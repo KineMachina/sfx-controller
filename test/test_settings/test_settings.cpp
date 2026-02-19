@@ -242,6 +242,49 @@ void test_demo_order_save_load(void) {
 }
 
 // ---------------------------------------------------------------------------
+// In-memory state: bass mono enabled
+// ---------------------------------------------------------------------------
+
+void test_bass_mono_enabled_default(void) {
+    TEST_ASSERT_FALSE(settings->loadBassMonoEnabled(false));
+    TEST_ASSERT_TRUE(settings->loadBassMonoEnabled(true));
+}
+
+void test_bass_mono_enabled_save_true(void) {
+    settings->saveBassMonoEnabled(true);
+    TEST_ASSERT_TRUE(settings->loadBassMonoEnabled(false));
+}
+
+void test_bass_mono_enabled_save_false(void) {
+    settings->saveBassMonoEnabled(false);
+    TEST_ASSERT_FALSE(settings->loadBassMonoEnabled(true));
+}
+
+// ---------------------------------------------------------------------------
+// In-memory state: bass mono crossover
+// ---------------------------------------------------------------------------
+
+void test_bass_mono_crossover_default(void) {
+    TEST_ASSERT_EQUAL_UINT16(80, settings->loadBassMonoCrossover(80));
+    TEST_ASSERT_EQUAL_UINT16(120, settings->loadBassMonoCrossover(120));
+}
+
+void test_bass_mono_crossover_save_load(void) {
+    settings->saveBassMonoCrossover(120);
+    TEST_ASSERT_EQUAL_UINT16(120, settings->loadBassMonoCrossover(80));
+}
+
+void test_bass_mono_crossover_clamp_low(void) {
+    settings->saveBassMonoCrossover(5);
+    TEST_ASSERT_EQUAL_UINT16(20, settings->loadBassMonoCrossover(80));
+}
+
+void test_bass_mono_crossover_clamp_high(void) {
+    settings->saveBassMonoCrossover(1000);
+    TEST_ASSERT_EQUAL_UINT16(500, settings->loadBassMonoCrossover(80));
+}
+
+// ---------------------------------------------------------------------------
 // Effects: initial state
 // ---------------------------------------------------------------------------
 
@@ -285,16 +328,25 @@ void test_get_effect_by_name_not_found(void) {
 // Effects: load from JSON and query
 // ---------------------------------------------------------------------------
 
-// Helper: directly call begin() which will fail to load SD (mock returns false)
-// Then manually parse a JSON config to populate effects
-static void loadTestEffects(SettingsController* sc) {
-    // begin() will open preferences (mock succeeds) and try SD (mock fails).
-    // Effects will remain at 0 after begin().
-    sc->begin(nullptr);
-
-    // Now simulate what loadFromConfigFile would do by calling
-    // loadEffectsFromConfig via a JSON document
-    const char* json = R"({
+// JSON config used by effects-loading tests.
+// SD mock must be configured with setFileContent() before calling begin().
+static const char* TEST_CONFIG_JSON = R"({
+    "audio": {
+        "volume": 15,
+        "bass_mono": {
+            "enabled": true,
+            "crossover_hz": 100
+        }
+    },
+    "led": {
+        "brightness": 200
+    },
+    "demo": {
+        "delay": 8000,
+        "mode": "led_only",
+        "order": "sequential"
+    },
+    "effects": {
         "roar": {
             "audio": "/sounds/roar.mp3",
             "led": "atomic_breath",
@@ -312,27 +364,14 @@ static void loadTestEffects(SettingsController* sc) {
             "loop": false,
             "av_sync": true,
             "category": "Attack"
+        },
+        "theme_song": {
+            "audio": "/sounds/theme.mp3",
+            "loop": true,
+            "category": "idle"
         }
-    })";
-
-    JsonDocument doc;
-    deserializeJson(doc, json);
-    JsonObject obj = doc.as<JsonObject>();
-
-    // loadEffectsFromConfig is private, but we can test via the public API
-    // by using a workaround: we'll use the fact that SettingsController has
-    // the method in the private section. Instead, we test through begin()
-    // which calls it. Since SD mock fails, we need another approach.
-    //
-    // Alternative: make the test a friend, or test through the public API only.
-    // For now, we'll test what we can through the public API.
-    // The effects are loaded through loadFromConfigFile which needs SD.
-    // We'll skip direct loadEffectsFromConfig tests and test only public APIs.
-}
-
-// Since loadEffectsFromConfig is private and SD mock always returns false,
-// we test the public query API with the empty state — and verify the
-// getLEDEffectFromName lookup works independently (it doesn't need loaded effects).
+    }
+})";
 
 void test_get_effects_by_category_empty(void) {
     SettingsController::Effect results[5];
@@ -345,6 +384,115 @@ void test_get_effects_by_category_null_safe(void) {
     // Category string is used to build a String — should handle edge cases
     int count = settings->getEffectsByCategory("", results, 5);
     TEST_ASSERT_EQUAL_INT(0, count);
+}
+
+// ---------------------------------------------------------------------------
+// Effects: load from config.json via SD mock
+// ---------------------------------------------------------------------------
+
+// Helper: configure SD mock with JSON, call begin(), then clear mock
+static void loadTestConfig(SettingsController* sc) {
+    SD.setFileContent(TEST_CONFIG_JSON);
+    sc->begin(nullptr);
+    SD.setFileContent(nullptr);
+}
+
+void test_load_effects_count(void) {
+    loadTestConfig(settings);
+    TEST_ASSERT_EQUAL_INT(4, settings->getEffectCount());
+}
+
+void test_load_effect_by_index(void) {
+    loadTestConfig(settings);
+    SettingsController::Effect effect;
+    TEST_ASSERT_TRUE(settings->getEffect(0, &effect));
+    TEST_ASSERT_EQUAL_STRING("roar", effect.name);
+    TEST_ASSERT_TRUE(effect.hasAudio);
+    TEST_ASSERT_TRUE(effect.hasLED);
+    TEST_ASSERT_EQUAL_STRING("/sounds/roar.mp3", effect.audioFile);
+    TEST_ASSERT_EQUAL_STRING("atomic_breath", effect.ledEffectName);
+    TEST_ASSERT_FALSE(effect.loop);
+    TEST_ASSERT_FALSE(effect.av_sync);
+    TEST_ASSERT_EQUAL_STRING("attack", effect.category);
+}
+
+void test_load_effect_led_only(void) {
+    loadTestConfig(settings);
+    SettingsController::Effect effect;
+    TEST_ASSERT_TRUE(settings->getEffect(1, &effect));
+    TEST_ASSERT_EQUAL_STRING("idle_glow", effect.name);
+    TEST_ASSERT_FALSE(effect.hasAudio);
+    TEST_ASSERT_TRUE(effect.hasLED);
+    TEST_ASSERT_EQUAL_STRING("idle", effect.ledEffectName);
+    TEST_ASSERT_TRUE(effect.loop);
+}
+
+void test_load_effect_av_sync(void) {
+    loadTestConfig(settings);
+    SettingsController::Effect effect;
+    TEST_ASSERT_TRUE(settings->getEffect(2, &effect));
+    TEST_ASSERT_EQUAL_STRING("battle_cry", effect.name);
+    TEST_ASSERT_TRUE(effect.av_sync);
+    TEST_ASSERT_TRUE(effect.hasAudio);
+    TEST_ASSERT_TRUE(effect.hasLED);
+}
+
+void test_load_effect_audio_only(void) {
+    loadTestConfig(settings);
+    SettingsController::Effect effect;
+    TEST_ASSERT_TRUE(settings->getEffect(3, &effect));
+    TEST_ASSERT_EQUAL_STRING("theme_song", effect.name);
+    TEST_ASSERT_TRUE(effect.hasAudio);
+    TEST_ASSERT_FALSE(effect.hasLED);
+    TEST_ASSERT_TRUE(effect.loop);
+    TEST_ASSERT_EQUAL_STRING("idle", effect.category);
+}
+
+void test_load_effect_by_name(void) {
+    loadTestConfig(settings);
+    SettingsController::Effect effect;
+    TEST_ASSERT_TRUE(settings->getEffectByName("battle_cry", &effect));
+    TEST_ASSERT_EQUAL_STRING("/sounds/battle.mp3", effect.audioFile);
+    TEST_ASSERT_EQUAL_STRING("beam_attack", effect.ledEffectName);
+}
+
+void test_load_effects_by_category(void) {
+    loadTestConfig(settings);
+    SettingsController::Effect results[5];
+    // "attack" and "Attack" should both match (case-insensitive)
+    int count = settings->getEffectsByCategory("attack", results, 5);
+    TEST_ASSERT_EQUAL_INT(2, count);
+}
+
+void test_load_effects_by_category_idle(void) {
+    loadTestConfig(settings);
+    SettingsController::Effect results[5];
+    int count = settings->getEffectsByCategory("idle", results, 5);
+    TEST_ASSERT_EQUAL_INT(2, count);
+}
+
+void test_load_effects_by_category_max_results(void) {
+    loadTestConfig(settings);
+    SettingsController::Effect results[1];
+    // Request at most 1 result from category with 2 matches
+    int count = settings->getEffectsByCategory("attack", results, 1);
+    TEST_ASSERT_EQUAL_INT(1, count);
+}
+
+void test_load_config_sets_boot_values(void) {
+    loadTestConfig(settings);
+    TEST_ASSERT_EQUAL_INT(15, settings->loadVolume(21));
+    TEST_ASSERT_EQUAL_UINT8(200, settings->loadBrightness(128));
+    TEST_ASSERT_EQUAL_UINT32(8000, settings->loadDemoDelay(5000));
+    TEST_ASSERT_EQUAL_INT(2, settings->loadDemoMode(0));        // led_only = 2
+    TEST_ASSERT_EQUAL_INT(1, settings->loadDemoOrder(0));        // sequential = 1
+    TEST_ASSERT_TRUE(settings->loadBassMonoEnabled(false));
+    TEST_ASSERT_EQUAL_UINT16(100, settings->loadBassMonoCrossover(80));
+}
+
+void test_has_settings_with_effects(void) {
+    loadTestConfig(settings);
+    TEST_ASSERT_TRUE(settings->hasSettings());
 }
 
 // ---------------------------------------------------------------------------
@@ -513,6 +661,15 @@ int main(int argc, char** argv) {
     RUN_TEST(test_demo_order_default);
     RUN_TEST(test_demo_order_save_load);
 
+    // Bass mono settings
+    RUN_TEST(test_bass_mono_enabled_default);
+    RUN_TEST(test_bass_mono_enabled_save_true);
+    RUN_TEST(test_bass_mono_enabled_save_false);
+    RUN_TEST(test_bass_mono_crossover_default);
+    RUN_TEST(test_bass_mono_crossover_save_load);
+    RUN_TEST(test_bass_mono_crossover_clamp_low);
+    RUN_TEST(test_bass_mono_crossover_clamp_high);
+
     // Effects — initial/empty state
     RUN_TEST(test_effect_count_initial);
     RUN_TEST(test_get_effect_empty);
@@ -523,6 +680,19 @@ int main(int argc, char** argv) {
     RUN_TEST(test_get_effect_by_name_not_found);
     RUN_TEST(test_get_effects_by_category_empty);
     RUN_TEST(test_get_effects_by_category_null_safe);
+
+    // Effects — loaded from config.json
+    RUN_TEST(test_load_effects_count);
+    RUN_TEST(test_load_effect_by_index);
+    RUN_TEST(test_load_effect_led_only);
+    RUN_TEST(test_load_effect_av_sync);
+    RUN_TEST(test_load_effect_audio_only);
+    RUN_TEST(test_load_effect_by_name);
+    RUN_TEST(test_load_effects_by_category);
+    RUN_TEST(test_load_effects_by_category_idle);
+    RUN_TEST(test_load_effects_by_category_max_results);
+    RUN_TEST(test_load_config_sets_boot_values);
+    RUN_TEST(test_has_settings_with_effects);
 
     // begin() integration
     RUN_TEST(test_begin_without_sd);
