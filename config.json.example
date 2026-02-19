@@ -1,0 +1,83 @@
+{
+  "audio": {
+    "volume": 21,
+    "bass_mono": {
+      "enabled": true,
+      "crossover_hz": 80
+    }
+  },
+  "led": {
+    "brightness": 128
+  },
+  "demo": {
+    "delay": 5000,
+    "mode": "audio_led",
+    "order": "random"
+  },
+  "effects": {
+    "startup": {
+      "audio": "/sounds/startup.mp3",
+      "led": "idle",
+      "category": "idle"
+    },
+    "godzilla_roar": {
+      "audio": "/sounds/godzilla_roar.mp3",
+      "led": "atomic_breath",
+      "category": "growl"
+    },
+    "ghidorah_attack": {
+      "audio": "/sounds/ghidorah_roar.mp3",
+      "led": "gravity_beam",
+      "category": "attack"
+    },
+    "fire_breath": {
+      "led": "fire_breath",
+      "category": "attack"
+    },
+    "electric_storm": {
+      "audio": "/sounds/electric.mp3",
+      "led": "electric_attack",
+      "category": "attack"
+    },
+    "battle_damage": {
+      "audio": "/sounds/damage.mp3",
+      "led": "battle_damage",
+      "category": "damage"
+    },
+    "victory_celebration": {
+      "audio": "/sounds/victory.mp3",
+      "led": "victory",
+      "category": "victory"
+    },
+    "death_scream": {
+      "audio": "/sounds/death.mp3",
+      "led": "battle_damage",
+      "category": "death"
+    },
+    "idle_breathing": {
+      "led": "idle",
+      "category": "idle"
+    },
+    "background_music": {
+      "audio": "/sounds/music.mp3",
+      "loop": true,
+      "category": "idle"
+    },
+    "ambient_glow": {
+      "led": "idle",
+      "loop": true,
+      "category": "idle"
+    },
+    "church_bells": {
+      "audio": "/sounds/church_bells.wav",
+      "loop": true,
+      "category": "idle"
+    },
+    "synced_roar": {
+      "audio": "/sounds/godzilla_roar.mp3",
+      "led": "atomic_breath",
+      "av_sync": true,
+      "category": "growl"
+    }
+  }
+}

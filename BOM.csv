@@ -1,0 +1,34 @@
+Ref Designator,Quantity,Part Number,Description,Value,Package,Manufacturer,MPN/Digi-Key Part,Notes
+U1,1,ESP32-S3-WROOM-1-N16R8,ESP32-S3 MCU Module,,"QFN-56 / Module",Espressif,ESP32-S3-WROOM-1-N16R8,16MB Flash 8MB PSRAM
+U2,1,PCM5122,I2S Audio DAC,,"QFN-32",Texas Instruments,PCM5122PW,32-bit 384kHz DAC
+U3,1,AMS1117-3.3,3.3V LDO Regulator,3.3V,SOT-223,AMS,AMS1117-3.3,1A output
+U4,1,AMS1117-5.0,5V LDO Regulator,5.0V,SOT-223,AMS,AMS1117-5.0,1A output
+U5,1,SD Card Socket,MicroSD Card Socket,,Through-hole,Various,DM3AT-SF-PEJM5,Surface mount alternative available
+J1,1,USB-C Connector,USB-C Receptacle,,Through-hole,Various,USB-C-016,For programming/power
+J2,1,3.5mm Audio Jack,Stereo Audio Jack,,Through-hole,Various,PJ-320A,Audio output
+J3,1,JST XH-2.54,2-pin Connector,,Through-hole,JST,B2B-XH-A,NeoPixel power/data
+J4,1,JST XH-2.54,2-pin Connector,,Through-hole,JST,B2B-XH-A,External power input
+SW1,1,Tactile Switch,Reset Button,,"6x6mm SMD",Various,B3SN-3112P,Reset switch
+SW2,1,Tactile Switch,Boot Button,,"6x6mm SMD",Various,B3SN-3112P,Boot mode switch
+R1,1,Resistor,Pull-up Resistor,10kΩ,0603,Yageo,RC0603FR-0710KL,I2C pull-up
+R2,1,Resistor,Pull-up Resistor,10kΩ,0603,Yageo,RC0603FR-0710KL,SPI pull-up
+R3,1,Resistor,Pull-up Resistor,10kΩ,0603,Yageo,RC0603FR-0710KL,General pull-up
+R4,1,Resistor,Pull-up Resistor,10kΩ,0603,Yageo,RC0603FR-0710KL,General pull-up
+R5,1,Resistor,Current Limiting Resistor,470Ω,0603,Yageo,RC0603FR-07470RL,NeoPixel data line
+R6,1,Resistor,Series Resistor,22Ω,0603,Yageo,RC0603FR-0722RL,I2S signal integrity
+R7,1,Resistor,Series Resistor,22Ω,0603,Yageo,RC0603FR-0722RL,I2S signal integrity
+R8,1,Resistor,Series Resistor,22Ω,0603,Yageo,RC0603FR-0722RL,I2S signal integrity
+C1,1,Ceramic Capacitor,Decoupling Capacitor,100nF,0603,Murata,GRM188R71H104KA93D,Power supply decoupling
+C2,1,Ceramic Capacitor,Decoupling Capacitor,100nF,0603,Murata,GRM188R71H104KA93D,Power supply decoupling
+C3,1,Ceramic Capacitor,Decoupling Capacitor,100nF,0603,Murata,GRM188R71H104KA93D,Power supply decoupling
+C4,1,Ceramic Capacitor,Bulk Capacitor,10µF,0805,Murata,GRM21BR71H106KE15L,Power supply filtering
+C5,1,Ceramic Capacitor,Bulk Capacitor,10µF,0805,Murata,GRM21BR71H106KE15L,Power supply filtering
+C6,1,Ceramic Capacitor,Crystal Load Capacitor,22pF,0603,Murata,GRM1885C1H220JA01D,ESP32 crystal (if external)
+C7,1,Ceramic Capacitor,Crystal Load Capacitor,22pF,0603,Murata,GRM1885C1H220JA01D,ESP32 crystal (if external)
+C8,1,Electrolytic Capacitor,Power Supply Capacitor,100µF,"6.3x5.4mm",Panasonic,EEE-FK1A101P,Power supply smoothing
+C9,1,Electrolytic Capacitor,Power Supply Capacitor,100µF,"6.3x5.4mm",Panasonic,EEE-FK1A101P,Power supply smoothing
+C10,1,Ceramic Capacitor,Bypass Capacitor,1µF,0603,Murata,GRM188R71H105KA12D,PCM5122 analog supply
+C11,1,Electrolytic Capacitor,Audio Coupling Capacitor,220µF,"6.3x5.4mm",Panasonic,EEE-FK1A221P,Audio output coupling
+C12,1,Electrolytic Capacitor,Audio Coupling Capacitor,220µF,"6.3x5.4mm",Panasonic,EEE-FK1A221P,Audio output coupling
+L1,1,Inductor,Power Supply Inductor,10µH,0805,Coilcraft,0805PS-100,Power supply filtering (optional)
+Y1,1,Crystal Oscillator,40MHz Crystal,40MHz,HC-49/SMD,Abracon,ABL-40.000MHZ-B2,ESP32 external crystal (if needed)
