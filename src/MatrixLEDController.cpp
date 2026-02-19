@@ -1,4 +1,5 @@
 #include "MatrixLEDController.h"
+#include "MatrixMath.h"
 #include <math.h>
 
 MatrixLEDController::MatrixLEDController(int pin, int gridWidth, int gridHeight)
@@ -1811,19 +1812,7 @@ void MatrixLEDController::effectTransporterTOS() {
 
 // Helper functions for matrix effects
 float MatrixLEDController::perlinNoise2D(float x, float y, float time) {
-    // Simplified Perlin noise using fractional Brownian motion
-    float value = 0.0f;
-    float amplitude = 1.0f;
-    float frequency = 1.0f;
-    
-    for (int i = 0; i < 3; i++) {
-        value += sin(x * frequency + time) * cos(y * frequency + time) * amplitude;
-        amplitude *= 0.5f;
-        frequency *= 2.0f;
-    }
-    
-    // Normalize to 0-1
-    return (value + 2.0f) / 4.0f;
+    return MatrixMath::perlinNoise2D(x, y, time);
 }
 
 void MatrixLEDController::drawChar(int x, int y, char c, uint32_t color) {
@@ -1843,42 +1832,7 @@ void MatrixLEDController::drawChar(int x, int y, char c, uint32_t color) {
 }
 
 uint8_t MatrixLEDController::getCharBitmap(char c, int row) {
-    // Simple 5x7 font data - only essential characters
-    // Each character is 5 bits wide, stored as bytes
-    static const uint8_t font[][7] = {
-        // Space (32)
-        {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
-        // G
-        {0x0E, 0x11, 0x10, 0x17, 0x11, 0x11, 0x0E},
-        // A
-        {0x0E, 0x11, 0x11, 0x1F, 0x11, 0x11, 0x11},
-        // M
-        {0x11, 0x1B, 0x15, 0x11, 0x11, 0x11, 0x11},
-        // E
-        {0x1F, 0x10, 0x10, 0x1E, 0x10, 0x10, 0x1F},
-        // O
-        {0x0E, 0x11, 0x11, 0x11, 0x11, 0x11, 0x0E},
-        // V
-        {0x11, 0x11, 0x11, 0x11, 0x11, 0x0A, 0x04},
-        // R
-        {0x1E, 0x11, 0x11, 0x1E, 0x14, 0x12, 0x11},
-    };
-    
-    // Map character to index
-    int index = -1;
-    if (c == ' ') index = 0;
-    else if (c == 'G' || c == 'g') index = 1;
-    else if (c == 'A' || c == 'a') index = 2;
-    else if (c == 'M' || c == 'm') index = 3;
-    else if (c == 'E' || c == 'e') index = 4;
-    else if (c == 'O' || c == 'o') index = 5;
-    else if (c == 'V' || c == 'v') index = 6;
-    else if (c == 'R' || c == 'r') index = 7;
-    
-    if (index >= 0 && row >= 0 && row < 7) {
-        return font[index][row];
-    }
-    return 0;
+    return MatrixMath::getCharBitmap(c, row);
 }
 
 void MatrixLEDController::drawLightningBolt(int x1, int y1, int y2, uint32_t color, int thickness) {
@@ -1970,40 +1924,11 @@ void MatrixLEDController::setPixelBrightness(uint8_t brightness) {
 
 // Grid helper functions
 int MatrixLEDController::xyToIndex(int x, int y) const {
-    // Grid mode: handle serpentine/snake wiring pattern
-    // Even rows go left-to-right, odd rows go right-to-left
-    if (x < 0 || x >= gridWidth || y < 0 || y >= gridHeight) {
-        return -1; // Invalid coordinates
-    }
-    
-    int rowStart = y * gridWidth;
-    if (y % 2 == 0) {
-        // Even row: left to right
-        return rowStart + x;
-    } else {
-        // Odd row: right to left
-        return rowStart + (gridWidth - 1 - x);
-    }
+    return MatrixMath::xyToIndex(x, y, gridWidth, gridHeight);
 }
 
 void MatrixLEDController::indexToXY(int index, int& x, int& y) const {
-    if (index < 0 || index >= numPixels) {
-        x = -1;
-        y = -1;
-        return;
-    }
-    
-    y = index / gridWidth;
-    int rowStart = y * gridWidth;
-    int rowIndex = index - rowStart;
-    
-    if (y % 2 == 0) {
-        // Even row: left to right
-        x = rowIndex;
-    } else {
-        // Odd row: right to left
-        x = gridWidth - 1 - rowIndex;
-    }
+    MatrixMath::indexToXY(index, x, y, gridWidth, numPixels);
 }
 
 void MatrixLEDController::setPixelXY(int x, int y, uint32_t color) {
@@ -2023,9 +1948,7 @@ uint32_t MatrixLEDController::getPixelXY(int x, int y) const {
 }
 
 float MatrixLEDController::distance2D(int x1, int y1, int x2, int y2) const {
-    int dx = x2 - x1;
-    int dy = y2 - y1;
-    return sqrt(dx * dx + dy * dy);
+    return MatrixMath::distance2D(x1, y1, x2, y2);
 }
 
 void MatrixLEDController::drawLine(int x1, int y1, int x2, int y2, uint32_t color) {
