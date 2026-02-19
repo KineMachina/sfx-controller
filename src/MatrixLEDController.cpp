@@ -1,5 +1,6 @@
 #include "MatrixLEDController.h"
 #include "MatrixMath.h"
+#include "LEDMath.h"
 #include <math.h>
 
 MatrixLEDController::MatrixLEDController(int pin, int gridWidth, int gridHeight)
@@ -1860,32 +1861,11 @@ void MatrixLEDController::drawLightningBolt(int x1, int y1, int y2, uint32_t col
 
 // Helper functions
 uint32_t MatrixLEDController::colorWheel(byte wheelPos) {
-    wheelPos = 255 - wheelPos;
-    if (wheelPos < 85) {
-        return matrix->Color(255 - wheelPos * 3, 0, wheelPos * 3);
-    } else if (wheelPos < 170) {
-        wheelPos -= 85;
-        return matrix->Color(0, wheelPos * 3, 255 - wheelPos * 3);
-    } else {
-        wheelPos -= 170;
-        return matrix->Color(wheelPos * 3, 255 - wheelPos * 3, 0);
-    }
+    return LEDMath::colorWheel(wheelPos);
 }
 
 uint32_t MatrixLEDController::blendColor(uint32_t color1, uint32_t color2, float ratio) {
-    ratio = constrain(ratio, 0.0f, 1.0f);
-    uint8_t r1 = (color1 >> 16) & 0xFF;
-    uint8_t g1 = (color1 >> 8) & 0xFF;
-    uint8_t b1 = color1 & 0xFF;
-    uint8_t r2 = (color2 >> 16) & 0xFF;
-    uint8_t g2 = (color2 >> 8) & 0xFF;
-    uint8_t b2 = color2 & 0xFF;
-    
-    uint8_t r = (uint8_t)(r1 * (1.0f - ratio) + r2 * ratio);
-    uint8_t g = (uint8_t)(g1 * (1.0f - ratio) + g2 * ratio);
-    uint8_t b = (uint8_t)(b1 * (1.0f - ratio) + b2 * ratio);
-    
-    return matrix->Color(r, g, b);
+    return LEDMath::blendColor(color1, color2, ratio);
 }
 
 void MatrixLEDController::setAllPixels(uint32_t color) {
@@ -1899,14 +1879,9 @@ void MatrixLEDController::fadeToBlack(int fadeValue) {
             int index = xyToIndex(x, y);
             if (index >= 0 && index < numPixels) {
                 uint32_t c = matrix->getPixelColor(index);
-                uint8_t r = (uint8_t)((c >> 16) & 0xFF);
-                uint8_t g = (uint8_t)((c >> 8) & 0xFF);
-                uint8_t b = (uint8_t)(c & 0xFF);
-                
-                r = (r * fadeValue) >> 8;
-                g = (g * fadeValue) >> 8;
-                b = (b * fadeValue) >> 8;
-                
+                uint8_t r = LEDMath::fadeChannel(LEDMath::unpackR(c), fadeValue);
+                uint8_t g = LEDMath::fadeChannel(LEDMath::unpackG(c), fadeValue);
+                uint8_t b = LEDMath::fadeChannel(LEDMath::unpackB(c), fadeValue);
                 matrix->drawPixel(x, y, matrix->Color(r, g, b));
             }
         }

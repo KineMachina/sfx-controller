@@ -1,4 +1,5 @@
 #include "StripLEDController.h"
+#include "LEDMath.h"
 #include <math.h>
 
 StripLEDController::StripLEDController(int pin, int numPixels)
@@ -848,32 +849,11 @@ void StripLEDController::effectRadialGradient() {
 
 // Helper functions
 uint32_t StripLEDController::colorWheel(byte wheelPos) {
-    wheelPos = 255 - wheelPos;
-    if (wheelPos < 85) {
-        return pixels->Color(255 - wheelPos * 3, 0, wheelPos * 3);
-    } else if (wheelPos < 170) {
-        wheelPos -= 85;
-        return pixels->Color(0, wheelPos * 3, 255 - wheelPos * 3);
-    } else {
-        wheelPos -= 170;
-        return pixels->Color(wheelPos * 3, 255 - wheelPos * 3, 0);
-    }
+    return LEDMath::colorWheel(wheelPos);
 }
 
 uint32_t StripLEDController::blendColor(uint32_t color1, uint32_t color2, float ratio) {
-    ratio = constrain(ratio, 0.0f, 1.0f);
-    uint8_t r1 = (color1 >> 16) & 0xFF;
-    uint8_t g1 = (color1 >> 8) & 0xFF;
-    uint8_t b1 = color1 & 0xFF;
-    uint8_t r2 = (color2 >> 16) & 0xFF;
-    uint8_t g2 = (color2 >> 8) & 0xFF;
-    uint8_t b2 = color2 & 0xFF;
-    
-    uint8_t r = (uint8_t)(r1 * (1.0f - ratio) + r2 * ratio);
-    uint8_t g = (uint8_t)(g1 * (1.0f - ratio) + g2 * ratio);
-    uint8_t b = (uint8_t)(b1 * (1.0f - ratio) + b2 * ratio);
-    
-    return pixels->Color(r, g, b);
+    return LEDMath::blendColor(color1, color2, ratio);
 }
 
 void StripLEDController::setAllPixels(uint32_t color) {
@@ -885,14 +865,9 @@ void StripLEDController::setAllPixels(uint32_t color) {
 void StripLEDController::fadeToBlack(int fadeValue) {
     for (int i = 0; i < numPixels; i++) {
         uint32_t color = pixels->getPixelColor(i);
-        uint8_t r = (color >> 16) & 0xFF;
-        uint8_t g = (color >> 8) & 0xFF;
-        uint8_t b = color & 0xFF;
-        
-        r = (r * fadeValue) >> 8;
-        g = (g * fadeValue) >> 8;
-        b = (b * fadeValue) >> 8;
-        
+        uint8_t r = LEDMath::fadeChannel(LEDMath::unpackR(color), fadeValue);
+        uint8_t g = LEDMath::fadeChannel(LEDMath::unpackG(color), fadeValue);
+        uint8_t b = LEDMath::fadeChannel(LEDMath::unpackB(color), fadeValue);
         pixels->setPixelColor(i, pixels->Color(r, g, b));
     }
 }
