@@ -32,10 +32,14 @@ inline BaseType_t xSemaphoreGive(SemaphoreHandle_t) { return pdTRUE; }
 // Queue stubs
 inline QueueHandle_t xQueueCreate(unsigned int, unsigned int) { return (QueueHandle_t)1; }
 inline BaseType_t xQueueSend(QueueHandle_t, const void*, TickType_t) { return pdTRUE; }
+inline BaseType_t xQueueSendToFront(QueueHandle_t, const void*, TickType_t) { return pdTRUE; }
 inline BaseType_t xQueueReceive(QueueHandle_t, void*, TickType_t) { return pdFALSE; }
+inline unsigned int uxQueueMessagesWaiting(QueueHandle_t) { return 0; }
 
 // Task stubs
 inline BaseType_t xTaskCreatePinnedToCore(void (*)(void*), const char*, uint32_t, void*, int, TaskHandle_t*, int) { return pdPASS; }
+inline TickType_t xTaskGetTickCount() { return 0; }
+inline void vTaskDelay(TickType_t) {}
 
 #endif // __cplusplus
 

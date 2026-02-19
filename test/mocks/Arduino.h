@@ -42,6 +42,10 @@ public:
     String operator+(const String& other) const { return String((_str + other._str).c_str()); }
     String operator+(const char* s) const { return String((_str + (s ? s : "")).c_str()); }
 
+    friend String operator+(const char* lhs, const String& rhs) {
+        return String((std::string(lhs ? lhs : "") + rhs._str).c_str());
+    }
+
     const char* c_str() const { return _str.c_str(); }
     unsigned int length() const { return (unsigned int)_str.length(); }
 
@@ -86,6 +90,14 @@ public:
     }
     bool concat(char c) { _str += c; return true; }
 
+    bool startsWith(const char* prefix) const {
+        if (!prefix) return false;
+        return _str.compare(0, strlen(prefix), prefix) == 0;
+    }
+    bool startsWith(const String& prefix) const {
+        return _str.compare(0, prefix.length(), prefix.c_str()) == 0;
+    }
+
     // Implicit conversion to std::string for ArduinoJson compatibility
     operator std::string() const { return _str; }
 
@@ -113,6 +125,10 @@ public:
 };
 
 static SerialMock Serial;
+
+// Pin stubs
+inline void pinMode(uint8_t, uint8_t) {}
+inline void digitalWrite(uint8_t, uint8_t) {}
 
 // Timing stubs
 inline unsigned long millis() { return 0; }
