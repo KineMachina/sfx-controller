@@ -10,6 +10,7 @@
 #include "SettingsController.h"
 #include "MQTTController.h"
 #include "BassMonoProcessor.h"
+#include "EffectDispatch.h"
 #include "RuntimeLog.h"
 
 static const char* TAG = "Main";
@@ -207,19 +208,24 @@ void setup() {
 
     // Print serial command help (always shown via Serial for interactive use)
     Serial.println("\nSerial Commands:");
-    Serial.println("  play:<filename>  - Play a file (e.g., play:/sounds/test.mp3)");
-    Serial.println("  stop             - Stop playback");
-    Serial.println("  volume:<0-21>    - Set volume (0-21)");
+    Serial.println("  play:<filename>  - Play audio file");
+    Serial.println("  stop             - Stop audio + LEDs");
+    Serial.println("  volume:<0-21>    - Set volume");
+    Serial.println("  brightness:<0-255> - Set LED brightness");
     Serial.println("  status           - Show current status");
-    Serial.println("  dir[:<path>]     - List directory (e.g., dir or dir:/sounds)");
-    Serial.println("  wifi             - Show WiFi config");
-    Serial.println("  wifi <ssid> <pw> - Set WiFi credentials");
-    Serial.println("  mqtt             - Show MQTT config");
-    Serial.println("  mqtt enable/disable/broker/id/name");
-    Serial.println("  log [off|error|warn|info|debug]");
-    Serial.println("  reboot           - Restart device");
+    Serial.println("  dir[:<path>]     - List SD card directory");
+    Serial.println("  led <name>       - Start LED effect (use 'led list' to see names)");
+    Serial.println("  led stop         - Stop LED effect");
+    Serial.println("  led list         - List LED effect names");
+    Serial.println("  effect <name>    - Execute configured effect");
+    Serial.println("  effects          - List configured effects");
+    Serial.println("  demo [start|stop|pause|resume|status]");
+    Serial.println("  bassmono         - Show bass mono DSP status");
+    Serial.println("  bassmono on/off  - Enable/disable bass mono");
+    Serial.println("  bassmono <20-500> - Set crossover frequency");
+    Serial.println("  wifi / mqtt / log / reboot / reset");
     Serial.println();
-    Serial.println("Tip: Use 'log error' or 'log off' to silence periodic messages.");
+    Serial.println("Tip: Use 'log off' to silence periodic messages.");
     if (httpServer.isConnected()) {
         httpServer.printEndpoints();
     }
@@ -307,21 +313,213 @@ void loop() {
         }
         else if (cmd == "stop") {
             audioController.stop();
-            Serial.println("Playback stopped.");
+            ledStripController.stopEffect();
+            ledMatrixController.stopEffect();
+            httpServer.updateLoops();  // stop any looping effect
+            Serial.println("Stopped.");
         }
         else if (cmd.startsWith("volume:")) {
             int vol = cmd.substring(7).toInt();
             if (vol >= 0 && vol <= 21) {
                 audioController.setVolume(vol);
+                settingsController.saveVolume(vol);
                 Serial.printf("Volume set to: %d\n", vol);
             } else {
                 Serial.println("Volume must be 0-21");
             }
         }
+        else if (cmd.startsWith("brightness:")) {
+            int b = cmd.substring(11).toInt();
+            if (b >= 0 && b <= 255) {
+                uint8_t brightness = (uint8_t)b;
+                ledStripController.setBrightness(brightness);
+                ledMatrixController.setBrightness(brightness);
+                settingsController.saveBrightness(brightness);
+                Serial.printf("Brightness set to: %d\n", brightness);
+            } else {
+                Serial.println("Brightness must be 0-255");
+            }
+        }
         else if (cmd == "status") {
-            Serial.printf("Current file: %s\n", audioController.getCurrentFile().c_str());
-            Serial.printf("Free heap: %u bytes\n", ESP.getFreeHeap());
-            Serial.printf("Audio running: %s\n", audioController.isPlaying() ? "Yes" : "No");
+            Serial.println("--- Audio ---");
+            Serial.printf("  Playing:    %s\n", audioController.isPlaying() ? "Yes" : "No");
+            if (audioController.isPlaying()) {
+                Serial.printf("  File:       %s\n", audioController.getCurrentFile().c_str());
+            }
+            Serial.printf("  Volume:     %d/21\n", audioController.getVolume());
+            Serial.printf("  Bass Mono:  %s (%u Hz)\n", bassMonoProcessor.isEnabled() ? "On" : "Off", bassMonoProcessor.getCrossoverHz());
+            Serial.println("--- LEDs ---");
+            Serial.printf("  Brightness: %d/255\n", ledStripController.getBrightness());
+            Serial.printf("  Strip:      %s\n", ledStripController.isEffectRunning() ? "Running" : "Off");
+            Serial.printf("  Matrix:     %s\n", ledMatrixController.isEffectRunning() ? "Running" : "Off");
+            String loopEffect = httpServer.getCurrentLoopingEffect();
+            if (loopEffect.length() > 0) {
+                Serial.printf("  Looping:    %s\n", loopEffect.c_str());
+            }
+            Serial.println("--- Demo ---");
+            Serial.printf("  State:      %s\n", demoController.isRunning() ? (demoController.isPaused() ? "Paused" : "Running") : "Off");
+            Serial.printf("  Files:      %d audio files\n", demoController.getAudioFileCount());
+            Serial.printf("  Effects:    %d configured\n", settingsController.getEffectCount());
+            Serial.println("--- Network ---");
+            Serial.printf("  WiFi SSID:  %s\n", strlen(wifiSSID) > 0 ? wifiSSID : "(not configured)");
+            Serial.printf("  WiFi:       %s\n", httpServer.isConnected() ? "Connected" : "Disconnected");
+            if (httpServer.isConnected()) {
+                Serial.printf("  IP:         %s\n", httpServer.getIPAddress().c_str());
+            }
+            SettingsController::MQTTConfig mqttCfg;
+            settingsController.loadMQTTConfig(&mqttCfg);
+            Serial.printf("  MQTT:       %s\n", mqttCfg.enabled ? (mqttController.isConnected() ? "Connected" : "Disconnected") : "Disabled");
+            if (mqttCfg.enabled) {
+                Serial.printf("  Broker:     %s:%d\n", mqttCfg.broker, mqttCfg.port);
+                Serial.printf("  Device ID:  %s\n", mqttCfg.deviceId);
+                Serial.printf("  Name:       %s\n", mqttCfg.deviceName);
+                Serial.printf("  Topic:      %s\n", mqttCfg.baseTopic);
+            }
+            Serial.println("--- System ---");
+            Serial.printf("  Heap:       %u bytes\n", ESP.getFreeHeap());
+            Serial.printf("  Uptime:     %lu s\n", millis() / 1000);
+            const char* lvl = "INFO";
+            switch (runtimeLogLevel) {
+                case ESP_LOG_NONE: lvl = "OFF"; break;
+                case ESP_LOG_ERROR: lvl = "ERROR"; break;
+                case ESP_LOG_WARN: lvl = "WARN"; break;
+                case ESP_LOG_DEBUG: lvl = "DEBUG"; break;
+                default: break;
+            }
+            Serial.printf("  Log level:  %s\n", lvl);
+        }
+        // --- LED effect commands ---
+        else if (cmd == "led list") {
+            Serial.println("Strip effects:");
+            Serial.println("  atomic_breath, gravity_beam, fire_breath, electric_attack,");
+            Serial.println("  battle_damage, victory, idle, rainbow, rainbow_chase,");
+            Serial.println("  color_wipe, theater_chase, pulse, breathing, meteor,");
+            Serial.println("  twinkle, water, strobe, radial_out, radial_in, spiral,");
+            Serial.println("  rotating_rainbow, circular_chase, radial_gradient");
+            Serial.println("Matrix effects:");
+            Serial.println("  beam_attack, explosion, impact_wave, damage_flash,");
+            Serial.println("  block_shield, dodge_trail, charge_up, finisher_beam,");
+            Serial.println("  gravity_beam_attack, electric_attack_matrix,");
+            Serial.println("  victory_dance, taunt_pattern, pose_strike,");
+            Serial.println("  celebration_wave, confetti, heart_eyes, power_up_aura,");
+            Serial.println("  transition_fade, game_over_chiron, cylon_eye,");
+            Serial.println("  perlin_inferno, emp_lightning, game_of_life,");
+            Serial.println("  plasma_clouds, digital_fireflies, matrix_rain,");
+            Serial.println("  dance_floor, alien_control_panel, atomic_breath_minus_one,");
+            Serial.println("  atomic_breath_mushroom, transporter_tos");
+        }
+        else if (cmd == "led stop") {
+            ledStripController.stopEffect();
+            ledMatrixController.stopEffect();
+            Serial.println("LED effects stopped.");
+        }
+        else if (cmd.startsWith("led ")) {
+            String effectName = cmd.substring(4);
+            effectName.trim();
+            if (effectName.length() == 0) {
+                Serial.println("Usage: led <effect_name> | led stop | led list");
+            } else if (dispatchLEDEffect(&settingsController, effectName.c_str(), &ledStripController, &ledMatrixController)) {
+                Serial.printf("LED effect started: %s\n", effectName.c_str());
+            } else {
+                Serial.printf("Unknown LED effect: %s (use 'led list')\n", effectName.c_str());
+            }
+        }
+        // --- Configured effects commands ---
+        else if (cmd == "effects") {
+            int count = settingsController.getEffectCount();
+            if (count == 0) {
+                Serial.println("No effects configured (check config.json on SD card).");
+            } else {
+                Serial.printf("Configured effects (%d):\n", count);
+                for (int i = 0; i < count; i++) {
+                    SettingsController::Effect effect;
+                    if (settingsController.getEffect(i, &effect)) {
+                        Serial.printf("  %-20s", effect.name);
+                        if (effect.hasAudio) Serial.printf(" audio:%s", effect.audioFile);
+                        if (effect.hasLED) Serial.printf(" led:%s", effect.ledEffectName);
+                        if (effect.loop) Serial.print(" [loop]");
+                        if (strlen(effect.category) > 0) Serial.printf(" (%s)", effect.category);
+                        Serial.println();
+                    }
+                }
+            }
+        }
+        else if (cmd.startsWith("effect ")) {
+            String effectName = originalCmd.substring(7);
+            effectName.trim();
+            if (effectName.length() == 0) {
+                Serial.println("Usage: effect <name>");
+            } else if (httpServer.executeEffectByName(effectName.c_str())) {
+                Serial.printf("Effect executed: %s\n", effectName.c_str());
+            } else {
+                Serial.printf("Effect not found: %s (use 'effects' to list)\n", effectName.c_str());
+            }
+        }
+        // --- Demo commands ---
+        else if (cmd == "demo" || cmd == "demo status") {
+            Serial.printf("Demo: %s\n", demoController.isRunning() ? (demoController.isPaused() ? "Paused" : "Running") : "Off");
+            const char* modeStr = "audio+led";
+            switch (demoController.getDemoMode()) {
+                case DemoController::DEMO_AUDIO_ONLY: modeStr = "audio_only"; break;
+                case DemoController::DEMO_LED_ONLY: modeStr = "led_only"; break;
+                case DemoController::DEMO_EFFECTS: modeStr = "effects"; break;
+                default: break;
+            }
+            Serial.printf("Mode: %s, Order: %s\n", modeStr,
+                demoController.getPlaybackOrder() == DemoController::ORDER_RANDOM ? "random" : "sequential");
+            Serial.printf("Audio files: %d\n", demoController.getAudioFileCount());
+        }
+        else if (cmd == "demo start") {
+            unsigned long delay = settingsController.loadDemoDelay(5000);
+            int mode = settingsController.loadDemoMode(0);
+            int order = settingsController.loadDemoOrder(0);
+            demoController.startDemo(delay, (DemoController::DemoMode)mode, (DemoController::PlaybackOrder)order);
+            Serial.println("Demo started.");
+        }
+        else if (cmd == "demo stop") {
+            demoController.stopDemo();
+            Serial.println("Demo stopped.");
+        }
+        else if (cmd == "demo pause") {
+            demoController.pauseDemo();
+            Serial.println("Demo paused.");
+        }
+        else if (cmd == "demo resume") {
+            demoController.resumeDemo();
+            Serial.println("Demo resumed.");
+        }
+        // --- Bass Mono DSP ---
+        else if (cmd == "bassmono" || cmd == "bass mono") {
+            Serial.printf("Bass Mono: %s\n", bassMonoProcessor.isEnabled() ? "Enabled" : "Disabled");
+            Serial.printf("Crossover: %u Hz\n", bassMonoProcessor.getCrossoverHz());
+        }
+        else if (cmd == "bassmono on" || cmd == "bass mono on") {
+            bassMonoProcessor.setEnabled(true);
+            settingsController.saveBassMonoEnabled(true);
+            Serial.println("Bass mono enabled.");
+        }
+        else if (cmd == "bassmono off" || cmd == "bass mono off") {
+            bassMonoProcessor.setEnabled(false);
+            settingsController.saveBassMonoEnabled(false);
+            Serial.println("Bass mono disabled.");
+        }
+        else if (cmd.startsWith("bassmono ") || cmd.startsWith("bass mono ")) {
+            String val = cmd.startsWith("bassmono ") ? cmd.substring(9) : cmd.substring(10);
+            val.trim();
+            int hz = val.toInt();
+            if (hz >= 20 && hz <= 500) {
+                bassMonoProcessor.setCrossoverHz((uint16_t)hz);
+                settingsController.saveBassMonoCrossover((uint16_t)hz);
+                Serial.printf("Bass mono crossover set to: %d Hz\n", hz);
+            } else {
+                Serial.println("Crossover must be 20-500 Hz");
+            }
+        }
+        // --- Factory reset ---
+        else if (cmd == "reset") {
+            Serial.println("Factory reset - clearing all settings...");
+            settingsController.clearAll();
+            Serial.println("Settings cleared. Reboot to apply.");
         }
         else if (cmd.startsWith("dir")) {
             // Extract directory path from "dir" or "dir:/path/to/dir"
@@ -490,17 +688,20 @@ void loop() {
         }
         else {
             Serial.println("Unknown command. Available commands:");
-            Serial.println("  play:<filename>  - Play a file");
-            Serial.println("  stop             - Stop playback");
-            Serial.println("  volume:<0-21>    - Set volume");
-            Serial.println("  status           - Show status");
-            Serial.println("  dir[:<path>]     - List directory");
-            Serial.println("  wifi             - Show WiFi config");
-            Serial.println("  wifi <ssid> <pw> - Set WiFi credentials");
-            Serial.println("  mqtt             - Show MQTT config");
-            Serial.println("  mqtt enable/disable/broker/id/name");
-            Serial.println("  log [off|error|warn|info|debug]");
-            Serial.println("  reboot           - Restart device");
+            Serial.println("  play:<filename>    - Play audio file");
+            Serial.println("  stop               - Stop audio + LEDs");
+            Serial.println("  volume:<0-21>      - Set volume");
+            Serial.println("  brightness:<0-255> - Set LED brightness");
+            Serial.println("  status             - Show device status");
+            Serial.println("  dir[:<path>]       - List SD card directory");
+            Serial.println("  led <name>         - Start LED effect");
+            Serial.println("  led stop           - Stop LED effects");
+            Serial.println("  led list           - List LED effect names");
+            Serial.println("  effect <name>      - Execute configured effect");
+            Serial.println("  effects            - List configured effects");
+            Serial.println("  demo [start|stop|pause|resume|status]");
+            Serial.println("  bassmono [on|off|<20-500>]");
+            Serial.println("  wifi / mqtt / log / reboot / reset");
         }
     }
 

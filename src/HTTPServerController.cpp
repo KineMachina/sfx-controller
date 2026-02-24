@@ -126,19 +126,6 @@ form{background:linear-gradient(135deg,#1a1a2e 0%,#0f0f1e 100%);padding:15px;bor
 <button type='submit' class='btn-primary'>Save MQTT config</button>
 </form>
 <p style='font-size:12px;color:#888;margin-top:10px;'>MQTT config is saved to Preferences. Reboot to apply.</p>
-<p style='font-size:12px;color:#aaa;margin-top:15px;'><strong>Config File:</strong> Create /config.json on SD card to load settings on boot:<br>
-{<br>
-&nbsp;&nbsp;"wifi": { "ssid": "YourNetwork", "password": "YourPassword" },<br>
-&nbsp;&nbsp;"audio": { "volume": 21 },<br>
-&nbsp;&nbsp;"led": { "brightness": 128 },<br>
-&nbsp;&nbsp;"demo": { "delay": 5000 },<br>
-&nbsp;&nbsp;"effects": {<br>
-&nbsp;&nbsp;&nbsp;&nbsp;"godzilla_roar": { "audio": "/sounds/godzilla.mp3", "led": "atomic_breath" },<br>
-&nbsp;&nbsp;&nbsp;&nbsp;"ghidorah_attack": { "audio": "/sounds/ghidorah.mp3", "led": "gravity_beam" },<br>
-&nbsp;&nbsp;&nbsp;&nbsp;"fire_breath": { "led": "fire_breath" },<br>
-&nbsp;&nbsp;&nbsp;&nbsp;"background_music": { "audio": "/sounds/music.mp3" }<br>
-&nbsp;&nbsp;}<br>
-}</p>
 </div>
 <h2>Demo Mode</h2>
 <div class='status' id='demoStatus'>Loading...</div>
