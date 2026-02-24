@@ -2,6 +2,9 @@
 #include "EffectDispatch.h"
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>
+#include "RuntimeLog.h"
+
+static const char* TAG = "HTTP";
 
 // Static instance pointer for callbacks
 HTTPServerController* HTTPServerController::instance = nullptr;
@@ -356,9 +359,8 @@ HTTPServerController::~HTTPServerController() {
 }
 
 bool HTTPServerController::initWiFi() {
-    Serial.println("Initializing WiFi...");
-    Serial.print("Connecting to: ");
-    Serial.println(wifiSSID);
+    ESP_LOGI(TAG, "Initializing WiFi...");
+    ESP_LOGI(TAG, "Connecting to: %s", wifiSSID);
     
     WiFi.mode(WIFI_STA);
     
@@ -375,31 +377,26 @@ bool HTTPServerController::initWiFi() {
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 30) {
         delay(500);
-        Serial.print(".");
+        ESP_LOGI(TAG, ".");
         attempts++;
     }
     
     if (WiFi.status() == WL_CONNECTED) {
-        Serial.println();
-        Serial.println("WiFi connected!");
-        Serial.print("IP address: ");
-        Serial.println(WiFi.localIP());
-        Serial.print("Signal strength (RSSI): ");
-        Serial.print(WiFi.RSSI());
-        Serial.println(" dBm");
-        
+        ESP_LOGI(TAG, "WiFi connected!");
+        ESP_LOGI(TAG, "IP address: %s", WiFi.localIP().toString().c_str());
+        ESP_LOGI(TAG, "Signal strength (RSSI): %d dBm", WiFi.RSSI());
+
         // Initialize mDNS for .local hostname resolution
         if (!MDNS.begin("esp32-audio")) {
-            Serial.println("Error setting up mDNS responder!");
+            ESP_LOGE(TAG, "Error setting up mDNS responder!");
         } else {
-            Serial.println("mDNS responder started");
-            Serial.println("Hostname: esp32-audio.local");
+            ESP_LOGI(TAG, "mDNS responder started");
+            ESP_LOGI(TAG, "Hostname: esp32-audio.local");
         }
         
         return true;
     } else {
-        Serial.println();
-        Serial.println("WiFi connection failed!");
+        ESP_LOGE(TAG, "WiFi connection failed!");
         return false;
     }
 }
@@ -704,10 +701,10 @@ void HTTPServerController::handleDir(AsyncWebServerRequest *request) {
 }
 
 void HTTPServerController::handleLEDEffect(AsyncWebServerRequest *request) {
-    Serial.println("[HTTP] LED effect request received");
-    
+    ESP_LOGI(TAG, "LED effect request received");
+
     if (!ledStripController && !ledMatrixController) {
-        Serial.println("[HTTP] ERROR: LED controllers not available");
+        ESP_LOGE(TAG, "LED controllers not available");
         JsonDocument errorDoc;
         errorDoc["status"] = "error";
         errorDoc["message"] = "LED controllers not available";
@@ -718,32 +715,25 @@ void HTTPServerController::handleLEDEffect(AsyncWebServerRequest *request) {
     }
     
     // Debug: Check all parameters
-    Serial.print("[HTTP] Method: ");
-    Serial.println(request->method() == HTTP_POST ? "POST" : "OTHER");
-    Serial.print("[HTTP] Content-Type: ");
-    Serial.println(request->contentType());
-    
+    ESP_LOGI(TAG, "Method: %s", request->method() == HTTP_POST ? "POST" : "OTHER");
+    ESP_LOGI(TAG, "Content-Type: %s", request->contentType().c_str());
+
     // Check both POST body and query parameters for debugging
     bool hasPostParam = request->hasParam("effect", true);
     bool hasQueryParam = request->hasParam("effect", false);
-    Serial.print("[HTTP] Has POST param: ");
-    Serial.print(hasPostParam ? "yes" : "no");
-    Serial.print(", Has query param: ");
-    Serial.println(hasQueryParam ? "yes" : "no");
+    ESP_LOGI(TAG, "Has POST param: %s, Has query param: %s", hasPostParam ? "yes" : "no", hasQueryParam ? "yes" : "no");
     
     // Read effect parameter from POST body (REST best practice)
     String effectName = "";
     if (hasPostParam) {
         effectName = request->getParam("effect", true)->value();
-        Serial.print("[HTTP] Got effect from POST body: ");
-        Serial.println(effectName);
+        ESP_LOGI(TAG, "Got effect from POST body: %s", effectName.c_str());
     } else if (hasQueryParam) {
         // Fallback to query param for debugging
         effectName = request->getParam("effect", false)->value();
-        Serial.print("[HTTP] Got effect from query string: ");
-        Serial.println(effectName);
+        ESP_LOGI(TAG, "Got effect from query string: %s", effectName.c_str());
     } else {
-        Serial.println("[HTTP] ERROR: Missing effect parameter");
+        ESP_LOGE(TAG, "Missing effect parameter");
         JsonDocument errorDoc;
         errorDoc["status"] = "error";
         errorDoc["message"] = "Missing effect parameter in request body";
@@ -755,7 +745,7 @@ void HTTPServerController::handleLEDEffect(AsyncWebServerRequest *request) {
     
     effectName.trim();
     if (effectName.length() == 0) {
-        Serial.println("[HTTP] ERROR: Empty effect parameter");
+        ESP_LOGE(TAG, "Empty effect parameter");
         JsonDocument errorDoc;
         errorDoc["status"] = "error";
         errorDoc["message"] = "Empty effect parameter";
@@ -765,8 +755,7 @@ void HTTPServerController::handleLEDEffect(AsyncWebServerRequest *request) {
         return;
     }
     
-    Serial.print("[HTTP] Processing effect: ");
-    Serial.println(effectName);
+    ESP_LOGI(TAG, "Processing effect: %s", effectName.c_str());
     
     if (!dispatchLEDEffect(settingsController, effectName.c_str(), ledStripController, ledMatrixController)) {
         JsonDocument errorDoc;
@@ -777,7 +766,7 @@ void HTTPServerController::handleLEDEffect(AsyncWebServerRequest *request) {
         request->send(400, "application/json", errorJson);
         return;
     }
-    Serial.println("[HTTP] LED effect started successfully");
+    ESP_LOGI(TAG, "LED effect started successfully");
     JsonDocument doc;
     doc["status"] = "ok";
     doc["message"] = "Effect started: " + effectName;
@@ -853,10 +842,10 @@ void HTTPServerController::handleLEDStop(AsyncWebServerRequest *request) {
 }
 
 void HTTPServerController::handleLEDEffectsList(AsyncWebServerRequest *request) {
-    Serial.println("[HTTP] LED effects list request received");
-    
+    ESP_LOGI(TAG, "LED effects list request received");
+
     if (!ledStripController && !ledMatrixController) {
-        Serial.println("[HTTP] WARNING: LED controllers not available, but returning effects list anyway");
+        ESP_LOGW(TAG, "LED controllers not available, but returning effects list anyway");
     }
     
     // Build JSON response with all available effects organized by category using ArduinoJson
@@ -942,9 +931,7 @@ void HTTPServerController::handleLEDEffectsList(AsyncWebServerRequest *request) 
     String json;
     serializeJson(doc, json);
     
-    Serial.print("[HTTP] Sending LED effects list (JSON length: ");
-    Serial.print(json.length());
-    Serial.println(")");
+    ESP_LOGD(TAG, "Sending LED effects list (JSON length: %u)", json.length());
     
     request->send(200, "application/json", json);
 }
@@ -985,12 +972,7 @@ void HTTPServerController::handleDemoStart(AsyncWebServerRequest *request) {
         else order = DemoController::ORDER_RANDOM;
     }
     
-    Serial.print("[HTTP] Starting demo: mode=");
-    Serial.print(mode);
-    Serial.print(", order=");
-    Serial.print(order);
-    Serial.print(", delay=");
-    Serial.println(delayMs);
+    ESP_LOGI(TAG, "Starting demo: mode=%d, order=%d, delay=%lu", (int)mode, (int)order, delayMs);
     
     demoController->startDemo(delayMs, mode, order);
     if (settingsController) {
@@ -1449,10 +1431,10 @@ void HTTPServerController::handleConfigReloadWrapper(AsyncWebServerRequest *requ
 }
 
 void HTTPServerController::handleEffectsList(AsyncWebServerRequest *request) {
-    Serial.println("[HTTP] Effects list request received");
-    
+    ESP_LOGI(TAG, "Effects list request received");
+
     if (!settingsController) {
-        Serial.println("[HTTP] ERROR: Settings controller not available");
+        ESP_LOGE(TAG, "Settings controller not available");
         JsonDocument errorDoc;
         errorDoc["status"] = "error";
         errorDoc["message"] = "Settings controller not available";
@@ -1461,10 +1443,9 @@ void HTTPServerController::handleEffectsList(AsyncWebServerRequest *request) {
         request->send(503, "application/json", errorJson);
         return;
     }
-    
+
     int effectCount = settingsController->getEffectCount();
-    Serial.print("[HTTP] Total effects configured: ");
-    Serial.println(effectCount);
+    ESP_LOGI(TAG, "Total effects configured: %d", effectCount);
     
     // Build JSON response using ArduinoJson
     JsonDocument doc;
@@ -1474,15 +1455,7 @@ void HTTPServerController::handleEffectsList(AsyncWebServerRequest *request) {
     for (int i = 0; i < effectCount; i++) {
         SettingsController::Effect effect;
         if (settingsController->getEffect(i, &effect)) {
-            Serial.print("[HTTP] Effect ");
-            Serial.print(i);
-            Serial.print(": ");
-            Serial.print(effect.name);
-            Serial.print(" (audio: ");
-            Serial.print(effect.hasAudio ? "yes" : "no");
-            Serial.print(", LED: ");
-            Serial.print(effect.hasLED ? "yes" : "no");
-            Serial.println(")");
+            ESP_LOGI(TAG, "Effect %d: %s (audio: %s, LED: %s)", i, effect.name, effect.hasAudio ? "yes" : "no", effect.hasLED ? "yes" : "no");
             
             JsonObject effectObj = effects.add<JsonObject>();
             effectObj["name"] = effect.name;
@@ -1503,19 +1476,15 @@ void HTTPServerController::handleEffectsList(AsyncWebServerRequest *request) {
     
     String json;
     serializeJson(doc, json);
-    Serial.print("[HTTP] Sending effects list (");
-    Serial.print(effectCount);
-    Serial.print(" effects, current loop: ");
-    Serial.print(currentLoopingEffect.length() > 0 ? currentLoopingEffect.c_str() : "none");
-    Serial.println(")");
+    ESP_LOGD(TAG, "Sending effects list (%d effects, current loop: %s)", effectCount, currentLoopingEffect.length() > 0 ? currentLoopingEffect.c_str() : "none");
     request->send(200, "application/json", json);
 }
 
 void HTTPServerController::handleEffectExecute(AsyncWebServerRequest *request) {
-    Serial.println("[HTTP] Effect execute request received");
-    
+    ESP_LOGI(TAG, "Effect execute request received");
+
     if (!settingsController) {
-        Serial.println("[HTTP] ERROR: Settings controller not available");
+        ESP_LOGE(TAG, "Settings controller not available");
         JsonDocument errorDoc;
         errorDoc["status"] = "error";
         errorDoc["message"] = "Settings controller not available";
@@ -1527,7 +1496,7 @@ void HTTPServerController::handleEffectExecute(AsyncWebServerRequest *request) {
     
     // Read effect name from POST body (REST best practice)
     if (!request->hasParam("name", true)) {
-        Serial.println("[HTTP] ERROR: Missing name parameter in request body");
+        ESP_LOGE(TAG, "Missing name parameter in request body");
         JsonDocument errorDoc;
         errorDoc["status"] = "error";
         errorDoc["message"] = "Missing name parameter in request body";
@@ -1538,16 +1507,13 @@ void HTTPServerController::handleEffectExecute(AsyncWebServerRequest *request) {
     }
     
     String effectName = request->getParam("name", true)->value();
-    Serial.print("[HTTP] Got name from POST body: ");
-    Serial.println(effectName);
-    
+    ESP_LOGI(TAG, "Got name from POST body: %s", effectName.c_str());
+
     effectName.trim();
-    Serial.print("[HTTP] Trimmed effect name: '");
-    Serial.print(effectName);
-    Serial.println("'");
+    ESP_LOGI(TAG, "Trimmed effect name: '%s'", effectName.c_str());
     
     if (effectName.length() == 0) {
-        Serial.println("[HTTP] ERROR: Effect name is empty after trimming");
+        ESP_LOGE(TAG, "Effect name is empty after trimming");
         JsonDocument errorDoc;
         errorDoc["status"] = "error";
         errorDoc["message"] = "Invalid effect name";
@@ -1557,13 +1523,11 @@ void HTTPServerController::handleEffectExecute(AsyncWebServerRequest *request) {
         return;
     }
     
-    Serial.print("[HTTP] Looking up effect: ");
-    Serial.println(effectName);
+    ESP_LOGI(TAG, "Looking up effect: %s", effectName.c_str());
     
     SettingsController::Effect effect;
     if (!settingsController->getEffectByName(effectName.c_str(), &effect)) {
-        Serial.print("[HTTP] ERROR: Effect not found: ");
-        Serial.println(effectName);
+        ESP_LOGE(TAG, "Effect not found: %s", effectName.c_str());
         JsonDocument errorDoc;
         errorDoc["status"] = "error";
         errorDoc["message"] = "Effect not found";
@@ -1572,71 +1536,58 @@ void HTTPServerController::handleEffectExecute(AsyncWebServerRequest *request) {
         request->send(404, "application/json", errorJson);
         return;
     }
-    
-    Serial.print("[HTTP] Effect found: ");
-    Serial.print(effect.name);
-    Serial.print(" (hasAudio: ");
-    Serial.print(effect.hasAudio ? "yes" : "no");
-    Serial.print(", hasLED: ");
-    Serial.print(effect.hasLED ? "yes" : "no");
-    Serial.print(", loop: ");
-    Serial.print(effect.loop ? "yes" : "no");
-    Serial.print(", av_sync: ");
-    Serial.print(effect.av_sync ? "yes" : "no");
-    Serial.println(")");
+
+    ESP_LOGI(TAG, "Effect found: %s (hasAudio: %s, hasLED: %s, loop: %s, av_sync: %s)", effect.name, effect.hasAudio ? "yes" : "no", effect.hasLED ? "yes" : "no", effect.loop ? "yes" : "no", effect.av_sync ? "yes" : "no");
     
     // Stop any currently looping effect
     if (isLoopingAudio || isLoopingLED) {
-        Serial.println("[HTTP] Stopping current loop before starting new effect");
+        ESP_LOGI(TAG, "Stopping current loop before starting new effect");
         stopEffectLoop();
     }
-    
+
     // Execute the effect
     bool audioPlayed = false;
     bool ledStarted = false;
-    
+
     if (effect.hasAudio && audioController) {
-        Serial.print("[HTTP] Playing audio file: ");
-        Serial.println(effect.audioFile);
+        ESP_LOGI(TAG, "Playing audio file: %s", effect.audioFile);
         
         // Check if file exists before attempting to play
         bool fileExists = audioController->fileExists(effect.audioFile);
         if (!fileExists) {
-            Serial.print("[HTTP] ERROR: Audio file not found: ");
-            Serial.println(effect.audioFile);
+            ESP_LOGE(TAG, "Audio file not found: %s", effect.audioFile);
             audioPlaybackFailed = true;
         } else if (audioController->playFile(effect.audioFile)) {
             audioPlayed = true;
             audioPlaybackFailed = false;  // Reset failure flag on success
             audioLoopStartTime = 0;  // Reset timeout
-            Serial.println("[HTTP] Audio file queued successfully");
+            ESP_LOGI(TAG, "Audio file queued successfully");
         } else {
-            Serial.println("[HTTP] ERROR: Failed to queue audio file");
+            ESP_LOGE(TAG, "Failed to queue audio file");
             audioPlaybackFailed = true;
             audioLoopStartTime = 0;
         }
     } else if (effect.hasAudio) {
-        Serial.println("[HTTP] WARNING: Effect has audio but audioController is null");
+        ESP_LOGW(TAG, "Effect has audio but audioController is null");
         audioPlaybackFailed = true;
     }
     
     if (effect.hasLED) {
         if (dispatchLEDEffect(settingsController, effect.ledEffectName, ledStripController, ledMatrixController)) {
-            Serial.print("[HTTP] Starting LED effect: ");
-            Serial.println(effect.ledEffectName);
+            ESP_LOGI(TAG, "Starting LED effect: %s", effect.ledEffectName);
             ledStarted = true;
-            Serial.println("[HTTP] LED effect started");
+            ESP_LOGI(TAG, "LED effect started");
         } else {
-            Serial.println("[HTTP] WARNING: Effect has LED but appropriate controller is not available or effect name unknown");
+            ESP_LOGW(TAG, "Effect has LED but appropriate controller is not available or effect name unknown");
         }
     }
     
     // Start looping if requested and playback was successful
     if (effect.loop) {
         if (effect.hasAudio && audioPlaybackFailed) {
-            Serial.println("[HTTP] WARNING: Loop requested but audio playback failed, loop not started");
+            ESP_LOGW(TAG, "Loop requested but audio playback failed, loop not started");
         } else {
-            Serial.println("[HTTP] Starting effect loop");
+            ESP_LOGI(TAG, "Starting effect loop");
             startEffectLoop(effect);
         }
     }
@@ -1651,14 +1602,12 @@ void HTTPServerController::handleEffectExecute(AsyncWebServerRequest *request) {
     
     String json;
     serializeJson(doc, json);
-    Serial.print("[HTTP] Sending response: ");
-    Serial.println(json);
+    ESP_LOGD(TAG, "Sending response: %s", json.c_str());
     request->send(200, "application/json", json);
 }
 
 void HTTPServerController::startEffectLoop(const SettingsController::Effect& effect) {
-    Serial.print("[HTTP] startEffectLoop() called for effect: ");
-    Serial.println(effect.name);
+    ESP_LOGI(TAG, "startEffectLoop() called for effect: %s", effect.name);
     
     currentLoopingEffect = effect.name;
     loopingAvSync = effect.av_sync;  // Store av_sync flag for loop
@@ -1669,10 +1618,9 @@ void HTTPServerController::startEffectLoop(const SettingsController::Effect& eff
         if (!audioPlaybackFailed) {
             isLoopingAudio = true;
             loopingAudioFile = effect.audioFile;
-            Serial.print("[HTTP] Audio looping enabled for: ");
-            Serial.println(loopingAudioFile);
+            ESP_LOGI(TAG, "Audio looping enabled for: %s", loopingAudioFile.c_str());
         } else {
-            Serial.println("[HTTP] WARNING: Audio looping disabled due to playback failure");
+            ESP_LOGW(TAG, "Audio looping disabled due to playback failure");
             isLoopingAudio = false;
         }
     }
@@ -1681,23 +1629,21 @@ void HTTPServerController::startEffectLoop(const SettingsController::Effect& eff
         isLoopingLED = true;
         strncpy(loopingLEDEffectName, effect.ledEffectName, sizeof(loopingLEDEffectName) - 1);
         loopingLEDEffectName[sizeof(loopingLEDEffectName) - 1] = '\0';
-        Serial.print("[HTTP] LED looping enabled for effect: ");
-        Serial.println(loopingLEDEffectName);
+        ESP_LOGI(TAG, "LED looping enabled for effect: %s", loopingLEDEffectName);
         loopingAvSync = effect.av_sync;
     }
 }
 
 void HTTPServerController::stopEffectLoop() {
-    Serial.print("[HTTP] stopEffectLoop() called, current loop: ");
-    Serial.println(currentLoopingEffect);
-    
+    ESP_LOGI(TAG, "stopEffectLoop() called, current loop: %s", currentLoopingEffect.c_str());
+
     if (isLoopingAudio && audioController) {
-        Serial.println("[HTTP] Stopping audio loop");
+        ESP_LOGI(TAG, "Stopping audio loop");
         audioController->stop();
     }
     
     if (isLoopingLED) {
-        Serial.println("[HTTP] Stopping LED loop");
+        ESP_LOGI(TAG, "Stopping LED loop");
         // Stop both controllers (effect could be on either)
         if (ledStripController) {
             ledStripController->stopEffect();
@@ -1716,38 +1662,28 @@ void HTTPServerController::stopEffectLoop() {
     audioPlaybackFailed = false;  // Reset failure flag when stopping loop
     audioLoopStartTime = 0;  // Reset timeout when stopping loop
     
-    Serial.println("[HTTP] Loop stopped");
+    ESP_LOGI(TAG, "Loop stopped");
 }
 
 bool HTTPServerController::executeEffectByName(const char* effectName) {
-    Serial.print("[Startup] Attempting to execute effect: ");
-    Serial.println(effectName);
-    
+    ESP_LOGI(TAG, "Startup: Attempting to execute effect: %s", effectName);
+
     if (!settingsController) {
-        Serial.println("[Startup] ERROR: Settings controller not available");
+        ESP_LOGE(TAG, "Startup: Settings controller not available");
         return false;
     }
-    
+
     SettingsController::Effect effect;
     if (!settingsController->getEffectByName(effectName, &effect)) {
-        Serial.print("[Startup] Effect not found: ");
-        Serial.println(effectName);
+        ESP_LOGE(TAG, "Startup: Effect not found: %s", effectName);
         return false;
     }
-    
-    Serial.print("[Startup] Effect found: ");
-    Serial.print(effect.name);
-    Serial.print(" (hasAudio: ");
-    Serial.print(effect.hasAudio ? "yes" : "no");
-    Serial.print(", hasLED: ");
-    Serial.print(effect.hasLED ? "yes" : "no");
-    Serial.print(", loop: ");
-    Serial.print(effect.loop ? "yes" : "no");
-    Serial.println(")");
+
+    ESP_LOGI(TAG, "Startup: Effect found: %s (hasAudio: %s, hasLED: %s, loop: %s)", effect.name, effect.hasAudio ? "yes" : "no", effect.hasLED ? "yes" : "no", effect.loop ? "yes" : "no");
     
     // Stop any currently looping effect
     if (isLoopingAudio || isLoopingLED) {
-        Serial.println("[Startup] Stopping current loop before starting startup effect");
+        ESP_LOGI(TAG, "Startup: Stopping current loop before starting startup effect");
         stopEffectLoop();
     }
     
@@ -1756,22 +1692,20 @@ bool HTTPServerController::executeEffectByName(const char* effectName) {
     bool ledStarted = false;
     
     if (effect.hasAudio && audioController) {
-        Serial.print("[Startup] Playing audio file: ");
-        Serial.println(effect.audioFile);
-        
+        ESP_LOGI(TAG, "Startup: Playing audio file: %s", effect.audioFile);
+
         // Check if file exists before attempting to play
         bool fileExists = audioController->fileExists(effect.audioFile);
         if (!fileExists) {
-            Serial.print("[Startup] ERROR: Audio file not found: ");
-            Serial.println(effect.audioFile);
+            ESP_LOGE(TAG, "Startup: Audio file not found: %s", effect.audioFile);
             audioPlaybackFailed = true;
         } else if (audioController->playFile(effect.audioFile)) {
             audioPlayed = true;
             audioPlaybackFailed = false;
             audioLoopStartTime = 0;
-            Serial.println("[Startup] Audio file queued successfully");
+            ESP_LOGI(TAG, "Startup: Audio file queued successfully");
         } else {
-            Serial.println("[Startup] ERROR: Failed to queue audio file");
+            ESP_LOGE(TAG, "Startup: Failed to queue audio file");
             audioPlaybackFailed = true;
             audioLoopStartTime = 0;
         }
@@ -1779,33 +1713,32 @@ bool HTTPServerController::executeEffectByName(const char* effectName) {
     
     if (effect.hasLED) {
         if (dispatchLEDEffect(settingsController, effect.ledEffectName, ledStripController, ledMatrixController)) {
-            Serial.print("[Startup] Starting LED effect: ");
-            Serial.println(effect.ledEffectName);
+            ESP_LOGI(TAG, "Startup: Starting LED effect: %s", effect.ledEffectName);
         }
     }
     
     // Start looping if requested and playback was successful
     if (effect.loop) {
         if (effect.hasAudio && audioPlaybackFailed) {
-            Serial.println("[Startup] WARNING: Loop requested but audio playback failed, loop not started");
+            ESP_LOGW(TAG, "Startup: Loop requested but audio playback failed, loop not started");
         } else {
-            Serial.println("[Startup] Starting effect loop");
+            ESP_LOGI(TAG, "Startup: Starting effect loop");
             startEffectLoop(effect);
         }
     }
     
-    Serial.println("[Startup] Startup effect executed successfully");
+    ESP_LOGI(TAG, "Startup: Startup effect executed successfully");
     return true;
 }
 
 void HTTPServerController::handleEffectStopLoop(AsyncWebServerRequest *request) {
-    Serial.println("[HTTP] Stop loop request received");
-    
+    ESP_LOGI(TAG, "Stop loop request received");
+
     JsonDocument doc;
     doc["status"] = "ok";
-    
+
     if (!isLoopingAudio && !isLoopingLED) {
-        Serial.println("[HTTP] No loop currently active");
+        ESP_LOGW(TAG, "No loop currently active");
         doc["message"] = "No loop active";
     } else {
         stopEffectLoop();
@@ -1893,7 +1826,7 @@ void HTTPServerController::handleBassMonoPost(AsyncWebServerRequest *request) {
 // ============================================================================
 
 void HTTPServerController::handleBattleTrigger(AsyncWebServerRequest *request) {
-    Serial.println("[Battle API] Trigger request received");
+    ESP_LOGI(TAG, "Battle: Trigger request received");
     
     if (!audioController || (!ledStripController && !ledMatrixController) || !settingsController) {
         JsonDocument errorDoc;
@@ -1957,16 +1890,14 @@ void HTTPServerController::handleBattleTrigger(AsyncWebServerRequest *request) {
         return;
     }
     
-    Serial.print("[Battle API] Request body: ");
-    Serial.println(body);
+    ESP_LOGI(TAG, "Battle: Request body: %s", body.c_str());
     
     // Parse JSON (using JsonDocument - ArduinoJson v7 API)
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, body);
     
     if (error) {
-        Serial.print("[Battle API] JSON parse error: ");
-        Serial.println(error.c_str());
+        ESP_LOGE(TAG, "Battle: JSON parse error: %s", error.c_str());
         JsonDocument errorDoc;
         errorDoc["status"] = "error";
         errorDoc["message"] = "Invalid JSON";
@@ -1992,14 +1923,7 @@ void HTTPServerController::handleBattleTrigger(AsyncWebServerRequest *request) {
     effectName.toLowerCase();
     priority.toLowerCase();
     
-    Serial.print("[Battle API] Command: ");
-    Serial.print(command);
-    Serial.print(", Category: ");
-    Serial.print(category);
-    Serial.print(", Effect: ");
-    Serial.print(effectName);
-    Serial.print(", Priority: ");
-    Serial.println(priority);
+    ESP_LOGI(TAG, "Battle: Command: %s, Category: %s, Effect: %s, Priority: %s", command.c_str(), category.c_str(), effectName.c_str(), priority.c_str());
     
     // Validate command
     if (command != "trigger") {
@@ -2022,8 +1946,7 @@ void HTTPServerController::handleBattleTrigger(AsyncWebServerRequest *request) {
         // Specific effect requested
         effectFound = settingsController->getEffectByName(effectName.c_str(), &effect);
         if (!effectFound) {
-            Serial.print("[Battle API] Effect not found: ");
-            Serial.println(effectName);
+            ESP_LOGE(TAG, "Battle: Effect not found: %s", effectName.c_str());
         }
     } else if (category.length() > 0) {
         // Find random effect in category
@@ -2035,14 +1958,9 @@ void HTTPServerController::handleBattleTrigger(AsyncWebServerRequest *request) {
             int index = random(count);
             effect = categoryEffects[index];
             effectFound = true;
-            Serial.print("[Battle API] Selected effect from category: ");
-            Serial.print(effect.name);
-            Serial.print(" (");
-            Serial.print(count);
-            Serial.println(" available)");
+            ESP_LOGI(TAG, "Battle: Selected effect from category: %s (%d available)", effect.name, count);
         } else {
-            Serial.print("[Battle API] No effects found in category: ");
-            Serial.println(category);
+            ESP_LOGW(TAG, "Battle: No effects found in category: %s", category.c_str());
         }
     } else {
         JsonDocument errorDoc;
@@ -2099,19 +2017,16 @@ void HTTPServerController::handleBattleTrigger(AsyncWebServerRequest *request) {
     if (effect.hasAudio) {
         if (audioController->playFile(effect.audioFile)) {
             audioPlayed = true;
-            Serial.print("[Battle API] Audio played: ");
-            Serial.println(effect.audioFile);
+            ESP_LOGI(TAG, "Battle: Audio played: %s", effect.audioFile);
         } else {
-            Serial.print("[Battle API] Failed to play audio: ");
-            Serial.println(effect.audioFile);
+            ESP_LOGE(TAG, "Battle: Failed to play audio: %s", effect.audioFile);
         }
     }
     
     if (effect.hasLED) {
         if (dispatchLEDEffect(settingsController, effect.ledEffectName, ledStripController, ledMatrixController)) {
             ledStarted = true;
-            Serial.print("[Battle API] LED effect started: ");
-            Serial.println(effect.ledEffectName);
+            ESP_LOGI(TAG, "Battle: LED effect started: %s", effect.ledEffectName);
         }
     }
     
@@ -2130,14 +2045,13 @@ void HTTPServerController::handleBattleTrigger(AsyncWebServerRequest *request) {
     
     String response;
     serializeJson(responseDoc, response);
-    Serial.print("[Battle API] Response: ");
-    Serial.println(response);
+    ESP_LOGD(TAG, "Battle: Response: %s", response.c_str());
     
     request->send(200, "application/json", response);
 }
 
 void HTTPServerController::handleBattleEffects(AsyncWebServerRequest *request) {
-    Serial.println("[Battle API] Effects list request received");
+    ESP_LOGI(TAG, "Battle: Effects list request received");
     
     if (!settingsController) {
         JsonDocument errorDoc;
@@ -2208,7 +2122,7 @@ void HTTPServerController::handleBattleEffects(AsyncWebServerRequest *request) {
 }
 
 void HTTPServerController::handleBattleStatus(AsyncWebServerRequest *request) {
-    Serial.println("[Battle API] Status request received");
+    ESP_LOGI(TAG, "Battle: Status request received");
     
     // Build JSON response using ArduinoJson
     JsonDocument doc;
@@ -2242,7 +2156,7 @@ void HTTPServerController::handleBattleStatus(AsyncWebServerRequest *request) {
 }
 
 void HTTPServerController::handleBattleHealth(AsyncWebServerRequest *request) {
-    Serial.println("[Battle API] Health check request received");
+    ESP_LOGI(TAG, "Battle: Health check request received");
     
     bool healthy = true;
     String issues = "";
@@ -2284,7 +2198,7 @@ void HTTPServerController::handleBattleHealth(AsyncWebServerRequest *request) {
 }
 
 void HTTPServerController::handleBattleStop(AsyncWebServerRequest *request) {
-    Serial.println("[Battle API] Stop request received");
+    ESP_LOGI(TAG, "Battle: Stop request received");
     
     // Stop all audio and LED effects
     if (audioController) {
@@ -2430,7 +2344,7 @@ bool HTTPServerController::begin(AudioController* audioCtrl, StripLEDController*
     
     // Start server (async server handles requests automatically)
     server->begin();
-    Serial.println("HTTP server started (AsyncWebServer)");
+    ESP_LOGI(TAG, "HTTP server started (AsyncWebServer)");
     
     return true;
 }
@@ -2445,7 +2359,7 @@ void HTTPServerController::update() {
         // Try to reconnect every 5 seconds
         if (now - lastReconnectAttempt > 5000) {
             lastReconnectAttempt = now;
-            Serial.println("WiFi disconnected, attempting to reconnect...");
+            ESP_LOGD(TAG, "WiFi disconnected, attempting to reconnect...");
             WiFi.disconnect();
             WiFi.begin(wifiSSID, wifiPassword);
         }
@@ -2473,7 +2387,7 @@ void HTTPServerController::updateLoops() {
                 unsigned long now = millis();
                 if (now - audioLoopStartTime > AUDIO_START_TIMEOUT) {
                     // Audio didn't start within timeout - likely an error
-                    Serial.println("[HTTP] ERROR: Audio failed to start within timeout, stopping loop");
+                    ESP_LOGE(TAG, "Audio failed to start within timeout, stopping loop");
                     audioPlaybackFailed = true;
                     isLoopingAudio = false;
                     audioLoopStartTime = 0;
@@ -2489,15 +2403,14 @@ void HTTPServerController::updateLoops() {
             // Verify file still exists before restarting
             bool fileExists = audioController->fileExists(loopingAudioFile);
             if (fileExists) {
-                Serial.print("[HTTP] Audio loop restarting: ");
-                Serial.println(loopingAudioFile);
+                ESP_LOGD(TAG, "Audio loop restarting: %s", loopingAudioFile.c_str());
                 if (audioController->playFile(loopingAudioFile)) {
                     // Successfully queued for playback - set timeout to check if it starts
                     audioLoopStartTime = millis();
-                    Serial.println("[HTTP] Audio loop restart queued successfully, waiting for playback to start...");
+                    ESP_LOGD(TAG, "Audio loop restart queued successfully, waiting for playback to start...");
                 } else {
                     // Failed to queue - stop looping
-                    Serial.println("[HTTP] ERROR: Failed to restart audio loop, stopping loop");
+                    ESP_LOGE(TAG, "Failed to restart audio loop, stopping loop");
                     audioPlaybackFailed = true;
                     isLoopingAudio = false;
                     if (!isLoopingLED) {
@@ -2507,8 +2420,7 @@ void HTTPServerController::updateLoops() {
                 }
             } else {
                 // File no longer exists - stop looping
-                Serial.print("[HTTP] ERROR: Audio file no longer exists, stopping loop: ");
-                Serial.println(loopingAudioFile);
+                ESP_LOGE(TAG, "Audio file no longer exists, stopping loop: %s", loopingAudioFile.c_str());
                 audioPlaybackFailed = true;
                 isLoopingAudio = false;
                 if (!isLoopingLED) {
@@ -2518,12 +2430,12 @@ void HTTPServerController::updateLoops() {
             }
         } else if (audioController->isPlaying() && audioLoopStartTime > 0) {
             // Audio started playing successfully - clear timeout
-            Serial.println("[HTTP] Audio loop restart confirmed - playback started");
+            ESP_LOGD(TAG, "Audio loop restart confirmed - playback started");
             audioLoopStartTime = 0;
         }
     } else if (isLoopingAudio && audioPlaybackFailed) {
         // Audio loop was active but playback failed - stop it
-        Serial.println("[HTTP] Audio loop stopped due to playback failure");
+        ESP_LOGE(TAG, "Audio loop stopped due to playback failure");
         isLoopingAudio = false;
         audioLoopStartTime = 0;
         if (!isLoopingLED) {
@@ -2534,8 +2446,7 @@ void HTTPServerController::updateLoops() {
     // Check LED loop
     if (isLoopingLED && loopingLEDEffectName[0] != '\0' && settingsController) {
         if (!isLEDEffectRunning(settingsController, loopingLEDEffectName, ledStripController, ledMatrixController)) {
-            Serial.print("[HTTP] LED loop restarting effect: ");
-            Serial.println(loopingLEDEffectName);
+            ESP_LOGD(TAG, "LED loop restarting effect: %s", loopingLEDEffectName);
             dispatchLEDEffect(settingsController, loopingLEDEffectName, ledStripController, ledMatrixController);
         }
     }
@@ -2546,150 +2457,65 @@ void HTTPServerController::printEndpoints() const {
         return;
     }
     
-    Serial.println("\nHTTP API Endpoints:");
-    Serial.print("  http://");
-    Serial.print(getIPAddress());
-    Serial.println("/ - Web interface");
-    
-    Serial.println("\nAudio Endpoints:");
-    Serial.print("  POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/play?file=/path/to/file.mp3");
-    Serial.print("  POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/stop");
-    Serial.print("  POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/volume?volume=21");
-    Serial.print("  GET http://");
-    Serial.print(getIPAddress());
-    Serial.println("/status");
-    Serial.print("  GET http://");
-    Serial.print(getIPAddress());
-    Serial.println("/dir?path=/");
-    
-    Serial.println("\nLED Effect Endpoints:");
-    Serial.println("  Themed Effects:");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=atomic_breath");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=gravity_beam");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=fire_breath");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=electric");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=battle_damage");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=victory");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=idle");
-    Serial.println("  Popular Effects:");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=rainbow");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=rainbow_chase");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=color_wipe");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=theater_chase");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=pulse");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=breathing");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=meteor");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=twinkle");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=water");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=strobe");
-    Serial.println("  Edge-Lit Disc Effects:");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=radial_out");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=radial_in");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=spiral");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=rotating_rainbow");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=circular_chase");
-    Serial.print("    POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/effect?effect=radial_gradient");
-    Serial.print("  POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/brightness?brightness=128");
-    
-    Serial.println("\nBattle Arena API Endpoints:");
-    Serial.print("  POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/api/battle/trigger?command=trigger&category=attack");
-    Serial.print("  POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/api/battle/trigger?command=trigger&effect=godzilla_roar");
-    Serial.print("  GET http://");
-    Serial.print(getIPAddress());
-    Serial.println("/api/battle/effects");
-    Serial.print("  GET http://");
-    Serial.print(getIPAddress());
-    Serial.println("/api/battle/effects?category=attack");
-    Serial.print("  GET http://");
-    Serial.print(getIPAddress());
-    Serial.println("/api/battle/status");
-    Serial.print("  GET http://");
-    Serial.print(getIPAddress());
-    Serial.println("/api/battle/health");
-    Serial.print("  POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/api/battle/stop");
-    Serial.print("  POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/led/stop");
-    
-    Serial.println("\nDemo Mode Endpoints:");
-    Serial.print("  POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/demo/start?delay=5000");
-    Serial.print("  POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/demo/stop");
-    Serial.print("  POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/demo/pause");
-    Serial.print("  POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/demo/resume");
-    Serial.print("  GET http://");
-    Serial.print(getIPAddress());
-    Serial.println("/demo/status");
-    
-    Serial.println("\nSettings Endpoints:");
-    Serial.print("  POST http://");
-    Serial.print(getIPAddress());
-    Serial.println("/settings/clear");
+    String ipStr = getIPAddress();
+    const char* ip = ipStr.c_str();
+
+    ESP_LOGD(TAG, "HTTP API Endpoints:");
+    ESP_LOGD(TAG, "  http://%s/ - Web interface", ip);
+
+    ESP_LOGD(TAG, "Audio Endpoints:");
+    ESP_LOGD(TAG, "  POST http://%s/play?file=/path/to/file.mp3", ip);
+    ESP_LOGD(TAG, "  POST http://%s/stop", ip);
+    ESP_LOGD(TAG, "  POST http://%s/volume?volume=21", ip);
+    ESP_LOGD(TAG, "  GET http://%s/status", ip);
+    ESP_LOGD(TAG, "  GET http://%s/dir?path=/", ip);
+
+    ESP_LOGD(TAG, "LED Effect Endpoints:");
+    ESP_LOGD(TAG, "  Themed Effects:");
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=atomic_breath", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=gravity_beam", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=fire_breath", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=electric", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=battle_damage", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=victory", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=idle", ip);
+    ESP_LOGD(TAG, "  Popular Effects:");
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=rainbow", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=rainbow_chase", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=color_wipe", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=theater_chase", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=pulse", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=breathing", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=meteor", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=twinkle", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=water", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=strobe", ip);
+    ESP_LOGD(TAG, "  Edge-Lit Disc Effects:");
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=radial_out", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=radial_in", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=spiral", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=rotating_rainbow", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=circular_chase", ip);
+    ESP_LOGD(TAG, "    POST http://%s/led/effect?effect=radial_gradient", ip);
+    ESP_LOGD(TAG, "  POST http://%s/led/brightness?brightness=128", ip);
+
+    ESP_LOGD(TAG, "Battle Arena API Endpoints:");
+    ESP_LOGD(TAG, "  POST http://%s/api/battle/trigger?command=trigger&category=attack", ip);
+    ESP_LOGD(TAG, "  POST http://%s/api/battle/trigger?command=trigger&effect=godzilla_roar", ip);
+    ESP_LOGD(TAG, "  GET http://%s/api/battle/effects", ip);
+    ESP_LOGD(TAG, "  GET http://%s/api/battle/effects?category=attack", ip);
+    ESP_LOGD(TAG, "  GET http://%s/api/battle/status", ip);
+    ESP_LOGD(TAG, "  GET http://%s/api/battle/health", ip);
+    ESP_LOGD(TAG, "  POST http://%s/api/battle/stop", ip);
+    ESP_LOGD(TAG, "  POST http://%s/led/stop", ip);
+
+    ESP_LOGD(TAG, "Demo Mode Endpoints:");
+    ESP_LOGD(TAG, "  POST http://%s/demo/start?delay=5000", ip);
+    ESP_LOGD(TAG, "  POST http://%s/demo/stop", ip);
+    ESP_LOGD(TAG, "  POST http://%s/demo/pause", ip);
+    ESP_LOGD(TAG, "  POST http://%s/demo/resume", ip);
+    ESP_LOGD(TAG, "  GET http://%s/demo/status", ip);
+
+    ESP_LOGD(TAG, "Settings Endpoints:");
+    ESP_LOGD(TAG, "  POST http://%s/settings/clear", ip);
 }

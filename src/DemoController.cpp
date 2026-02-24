@@ -1,6 +1,9 @@
 #include "DemoController.h"
 #include "SettingsController.h"
 #include "EffectDispatch.h"
+#include "RuntimeLog.h"
+
+static const char* TAG = "Demo";
 
 DemoController::DemoController(AudioController* audioCtrl, StripLEDController* ledStripCtrl, SettingsController* settingsCtrl, MatrixLEDController* ledMatrixCtrl)
     : audioController(audioCtrl), ledStripController(ledStripCtrl), ledMatrixController(ledMatrixCtrl), settingsController(settingsCtrl),
@@ -18,11 +21,11 @@ DemoController::~DemoController() {
 }
 
 bool DemoController::begin() {
-    Serial.println("Initializing Demo Controller...");
-    
+    ESP_LOGI(TAG, "Initializing Demo Controller...");
+
     // Scan for audio files
     rescanFiles();
-    
+
     // Start demo task on Core 1
     xTaskCreatePinnedToCore(
         demoTaskWrapper,
@@ -33,10 +36,8 @@ bool DemoController::begin() {
         &demoTaskHandle,
         1   // Core 1
     );
-    
-    Serial.print("Demo Controller initialized. Found ");
-    Serial.print(audioFileCount);
-    Serial.println(" audio files.");
+
+    ESP_LOGI(TAG, "Demo Controller initialized. Found %d audio files.", audioFileCount);
     
     return true;
 }
@@ -47,7 +48,7 @@ void DemoController::demoTaskWrapper(void* parameter) {
 }
 
 void DemoController::demoTask() {
-    Serial.println("Demo task started on Core 1");
+    ESP_LOGI(TAG, "Demo task started on Core 1");
     
     while (true) {
         if (demoRunning && !demoPaused) {
@@ -82,10 +83,7 @@ void DemoController::demoTask() {
                         if (audioFile.length() > 0) {
                             String effectName = (playbackOrder == ORDER_RANDOM) ?
                                 getEffectForFile(audioFile) : getNextEffect();
-                            Serial.print("[Demo] Playing: ");
-                            Serial.print(audioFile);
-                            Serial.print(" with effect: ");
-                            Serial.println(effectName);
+                            ESP_LOGI(TAG, "Playing: %s with effect: %s", audioFile.c_str(), effectName.c_str());
                             dispatchLEDEffect(settingsController, effectName.c_str(), ledStripController, ledMatrixController);
                             audioController->playFile(audioFile);
                             success = true;
@@ -97,8 +95,7 @@ void DemoController::demoTask() {
                         // Audio files only
                         String audioFile = (playbackOrder == ORDER_RANDOM) ? getRandomAudioFile() : getNextAudioFile();
                         if (audioFile.length() > 0) {
-                            Serial.print("[Demo] Playing audio: ");
-                            Serial.println(audioFile);
+                            ESP_LOGI(TAG, "Playing audio: %s", audioFile.c_str());
                             audioController->playFile(audioFile);
                             success = true;
                         }
@@ -108,8 +105,7 @@ void DemoController::demoTask() {
                     case DEMO_LED_ONLY: {
                         // LED effects only
                         String effectName = (playbackOrder == ORDER_RANDOM) ? getRandomEffect() : getNextEffect();
-                        Serial.print("[Demo] Playing LED effect: ");
-                        Serial.println(effectName);
+                        ESP_LOGI(TAG, "Playing LED effect: %s", effectName.c_str());
                         if (dispatchLEDEffect(settingsController, effectName.c_str(), ledStripController, ledMatrixController)) {
                             success = true;
                         }
@@ -127,7 +123,7 @@ void DemoController::demoTask() {
                 if (success) {
                     lastDemoAction = currentTime;
                 } else {
-                    Serial.println("[Demo] No content available, rescanning...");
+                    ESP_LOGW(TAG, "No content available, rescanning...");
                     if (demoMode == DEMO_AUDIO_ONLY || demoMode == DEMO_AUDIO_LED) {
                         rescanFiles();
                     }
@@ -145,7 +141,7 @@ void DemoController::scanAudioFiles(const char* directory) {
     
     SemaphoreHandle_t mutex = audioController->getSDMutex();
     if (mutex == NULL) {
-        Serial.println("[Demo] ERROR: SD card mutex not available");
+        ESP_LOGE(TAG, "SD card mutex not available");
         return;
     }
     
@@ -189,14 +185,11 @@ void DemoController::scanAudioFiles(const char* directory) {
         
         xSemaphoreGive(mutex);
     } else {
-        Serial.println("[Demo] ERROR: Timeout waiting for SD card access");
+        ESP_LOGE(TAG, "Timeout waiting for SD card access");
     }
     
     filesScanned = true;
-    Serial.print("[Demo] Scanned ");
-    Serial.print(audioFileCount);
-    Serial.print(" audio files from ");
-    Serial.println(directory);
+    ESP_LOGI(TAG, "Scanned %d audio files from %s", audioFileCount, directory);
 }
 
 void DemoController::rescanFiles() {
@@ -283,12 +276,7 @@ void DemoController::startDemo(unsigned long delayMs, DemoMode mode, PlaybackOrd
         rescanFiles();
     }
     
-    Serial.print("[Demo] Demo mode started: mode=");
-    Serial.print(mode);
-    Serial.print(", order=");
-    Serial.print(order);
-    Serial.print(", delay=");
-    Serial.println(delayMs);
+    ESP_LOGI(TAG, "Demo mode started: mode=%d, order=%d, delay=%lu", mode, order, delayMs);
 }
 
 void DemoController::setDemoMode(DemoMode mode, PlaybackOrder order) {
@@ -300,21 +288,18 @@ void DemoController::setDemoMode(DemoMode mode, PlaybackOrder order) {
     currentLEDIndex = 0;
     currentEffectIndex = 0;
     
-    Serial.print("[Demo] Mode changed: mode=");
-    Serial.print(mode);
-    Serial.print(", order=");
-    Serial.println(order);
+    ESP_LOGI(TAG, "Mode changed: mode=%d, order=%d", mode, order);
 }
 
 void DemoController::executeNextEffect() {
     if (!settingsController) {
-        Serial.println("[Demo] ERROR: SettingsController not available for effects mode");
+        ESP_LOGE(TAG, "SettingsController not available for effects mode");
         return;
     }
     
     int effectCount = settingsController->getEffectCount();
     if (effectCount == 0) {
-        Serial.println("[Demo] No effects configured");
+        ESP_LOGW(TAG, "No effects configured");
         return;
     }
     
@@ -336,8 +321,7 @@ void DemoController::executeNextEffect() {
         currentEffectIndex = (currentEffectIndex + 1) % effectCount;
     }
     
-    Serial.print("[Demo] Executing effect: ");
-    Serial.println(effect.name);
+    ESP_LOGI(TAG, "Executing effect: %s", effect.name);
     
     // Execute the effect (audio, LED, or both)
     if (effect.hasAudio && audioController) {
@@ -363,13 +347,13 @@ void DemoController::stopDemo() {
         ledMatrixController->stopEffect();
     }
     
-    Serial.println("[Demo] Demo mode stopped");
+    ESP_LOGI(TAG, "Demo mode stopped");
 }
 
 void DemoController::pauseDemo() {
     if (demoRunning && !demoPaused) {
         demoPaused = true;
-        Serial.println("[Demo] Demo mode paused");
+        ESP_LOGI(TAG, "Demo mode paused");
     }
 }
 
@@ -377,7 +361,7 @@ void DemoController::resumeDemo() {
     if (demoRunning && demoPaused) {
         demoPaused = false;
         lastDemoAction = millis();
-        Serial.println("[Demo] Demo mode resumed");
+        ESP_LOGI(TAG, "Demo mode resumed");
     }
 }
 

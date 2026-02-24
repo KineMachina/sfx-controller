@@ -4,6 +4,9 @@
 #include <semphr.h>
 #include <string.h>
 #include <ESPmDNS.h>
+#include "RuntimeLog.h"
+
+static const char* TAG = "MQTT";
 
 // Static instance pointer for callbacks
 MQTTController* MQTTController::instance = nullptr;
@@ -32,7 +35,7 @@ static const char* getDisconnectReasonString(AsyncMqttClientDisconnectReason rea
     }
 }
 
-MQTTController::MQTTController() 
+MQTTController::MQTTController()
     : configLoaded(false)
     , connected(false)
     , connectionInProgress(false)
@@ -62,33 +65,35 @@ MQTTController::MQTTController()
     messageBuffer[0] = '\0';
     currentTopic[0] = '\0';
     // Initialize topic strings
+    topicState[0] = '\0';
+    topicName[0] = '\0';
+    topicCapabilities[0] = '\0';
     topicCommand[0] = '\0';
     topicStatus[0] = '\0';
     topicStatusAudio[0] = '\0';
     topicStatusLED[0] = '\0';
     topicStatusHealth[0] = '\0';
     topicResponse[0] = '\0';
-    topicLWT[0] = '\0';
 }
 
 MQTTController::~MQTTController() {
     if (connected) {
         mqttClient.disconnect(true);
     }
-    
+
     // Delete task and queue
     if (mqttTaskHandle != NULL) {
         vTaskDelete(mqttTaskHandle);
         mqttTaskHandle = NULL;
     }
-    
+
     if (mqttCommandQueue != NULL) {
         vQueueDelete(mqttCommandQueue);
         mqttCommandQueue = NULL;
     }
 }
 
-bool MQTTController::begin(AudioController* audioCtrl, 
+bool MQTTController::begin(AudioController* audioCtrl,
                            StripLEDController* ledStripCtrl,
                            MatrixLEDController* ledMatrixCtrl,
                            DemoController* demoCtrl,
@@ -99,60 +104,56 @@ bool MQTTController::begin(AudioController* audioCtrl,
     ledMatrixController = ledMatrixCtrl;
     demoController = demoCtrl;
     settingsController = settingsCtrl;
-    
+
     // Set static instance for callbacks
     instance = this;
-    
+
     // Load MQTT configuration
     if (!settingsController) {
-        Serial.println("[MQTT] Settings controller not available");
+        ESP_LOGW(TAG, "Settings controller not available");
         return false;
     }
-    
+
     configLoaded = settingsController->loadMQTTConfig(&config, sdMutex);
-    
+
     if (!configLoaded || !config.enabled) {
-        Serial.println("[MQTT] MQTT disabled or not configured");
+        ESP_LOGW(TAG, "MQTT disabled or not configured");
         return false;
     }
-    
+
     if (strlen(config.broker) == 0) {
-        Serial.println("[MQTT] MQTT broker not configured");
+        ESP_LOGW(TAG, "MQTT broker not configured");
         return false;
     }
-    
+
     // Build topic strings
     buildTopics();
-    
+
     // Resolve broker hostname to IP address (supports mDNS .local domains)
     brokerIP = resolveHostname(config.broker);
     if (brokerIP == IPAddress(0, 0, 0, 0)) {
-        Serial.print("[MQTT] ERROR: Failed to resolve broker hostname: ");
-        Serial.println(config.broker);
-        Serial.println("[MQTT] Make sure broker is on the network and mDNS is working");
+        ESP_LOGE(TAG, "Failed to resolve broker hostname: %s", config.broker);
+        ESP_LOGE(TAG, "Make sure broker is on the network and mDNS is working");
         return false;
     }
-    
+
     brokerIPResolved = true;
-    Serial.print("[MQTT] Resolved broker hostname '");
-    Serial.print(config.broker);
-    Serial.print("' to IP: ");
-    Serial.println(brokerIP);
-    
+    ESP_LOGI(TAG, "Resolved broker hostname '%s' to IP: %s", config.broker, brokerIP.toString().c_str());
+
     // Setup MQTT client callbacks
     mqttClient.onConnect(onMqttConnectWrapper);
     mqttClient.onDisconnect(onMqttDisconnectWrapper);
     mqttClient.onMessage(onMqttMessageWrapper);
-    
+
     // Set server using resolved IP address
     mqttClient.setServer(brokerIP, config.port);
     if (strlen(config.username) > 0) {
         mqttClient.setCredentials(config.username, config.password);
     }
-    
+
     // Set keepalive
     mqttClient.setKeepAlive(config.keepalive);
-    
+
     // Set client ID (use device ID if available, otherwise use MAC address)
     String clientId = "kinemachina_";
     if (strlen(config.deviceId) > 0) {
@@ -162,17 +163,17 @@ bool MQTTController::begin(AudioController* audioCtrl,
         clientId.replace(":", "");
     }
     mqttClient.setClientId(clientId.c_str());
-    
-    // Set Last Will and Testament (LWT)
-    mqttClient.setWill(topicLWT, 0, true, "offline");
-    
+
+    // Set Last Will and Testament (LWT) - KRP v1.0: $state → "offline"
+    mqttClient.setWill(topicState, 1, true, "offline");
+
     // Create command queue (10 items should be enough)
     mqttCommandQueue = xQueueCreate(10, sizeof(MQTTCommand));
     if (mqttCommandQueue == NULL) {
-        Serial.println("[MQTT] ERROR: Failed to create command queue!");
+        ESP_LOGE(TAG, "Failed to create command queue!");
         return false;
     }
-    
+
     // Create MQTT processing task
     // Priority 2 (same as LED task), stack 16KB, pinned to Core 1
     // Increased stack size to handle JSON parsing and String operations
@@ -185,30 +186,22 @@ bool MQTTController::begin(AudioController* audioCtrl,
         &mqttTaskHandle,
         1      // Core 1
     );
-    
+
     if (taskResult != pdPASS) {
-        Serial.println("[MQTT] ERROR: Failed to create MQTT task!");
+        ESP_LOGE(TAG, "Failed to create MQTT task!");
         vQueueDelete(mqttCommandQueue);
         mqttCommandQueue = NULL;
         return false;
     }
-    
-    Serial.println("[MQTT] -------- Config --------");
-    Serial.print("[MQTT] Broker: ");
-    Serial.print(config.broker);
-    Serial.print(" -> ");
-    Serial.print(brokerIP);
-    Serial.print(":");
-    Serial.println(config.port);
-    Serial.print("[MQTT] Device ID: ");
-    Serial.println(strlen(config.deviceId) > 0 ? config.deviceId : "(from MAC)");
-    Serial.print("[MQTT] Base topic: ");
-    Serial.println(strlen(config.baseTopic) > 0 ? config.baseTopic : "kinemachina/sfx");
-    Serial.print("[MQTT] Auth: ");
-    Serial.println(strlen(config.username) > 0 ? "yes" : "no");
-    Serial.println("[MQTT] Command queue and task created");
-    Serial.println("[MQTT] ------------------------");
-    Serial.println("[MQTT] Attempting initial connection...");
+
+    ESP_LOGI(TAG, "-------- Config --------");
+    ESP_LOGI(TAG, "Broker: %s -> %s:%d", config.broker, brokerIP.toString().c_str(), config.port);
+    ESP_LOGI(TAG, "Device ID: %s", strlen(config.deviceId) > 0 ? config.deviceId : "(from MAC)");
+    ESP_LOGI(TAG, "Base topic: %s", strlen(config.baseTopic) > 0 ? config.baseTopic : "kinemachina/sfx");
+    ESP_LOGI(TAG, "Auth: %s", strlen(config.username) > 0 ? "yes" : "no");
+    ESP_LOGI(TAG, "Command queue and task created");
+    ESP_LOGI(TAG, "------------------------");
+    ESP_LOGI(TAG, "Attempting initial connection...");
 
     // Attempt initial connection
     reconnect();
@@ -220,73 +213,60 @@ IPAddress MQTTController::resolveHostname(const char* hostname) {
     // Check if it's already an IP address
     IPAddress ip;
     if (ip.fromString(hostname)) {
-        Serial.print("[MQTT] Broker is already an IP address: ");
-        Serial.println(ip);
+        ESP_LOGD(TAG, "Broker is already an IP address: %s", ip.toString().c_str());
         return ip;
     }
-    
-    Serial.print("[MQTT] Resolving hostname: ");
-    Serial.println(hostname);
-    
+
+    ESP_LOGD(TAG, "Resolving hostname: %s", hostname);
+
     // Try mDNS resolution first (for .local domains)
     if (strstr(hostname, ".local") != NULL) {
-        Serial.println("[MQTT] Attempting mDNS resolution...");
-        
+        ESP_LOGD(TAG, "Attempting mDNS resolution...");
+
         // Wait a bit for mDNS to be ready (if WiFi just connected)
         delay(1000);
-        
+
         // Query mDNS
         IPAddress mdnsIP = MDNS.queryHost(hostname);
         if (mdnsIP != IPAddress(0, 0, 0, 0)) {
-            Serial.print("[MQTT] mDNS resolution successful: ");
-            Serial.println(mdnsIP);
+            ESP_LOGD(TAG, "mDNS resolution successful: %s", mdnsIP.toString().c_str());
             return mdnsIP;
         } else {
-            Serial.println("[MQTT] mDNS resolution failed (is broker advertising .local?), trying DNS...");
+            ESP_LOGD(TAG, "mDNS resolution failed (is broker advertising .local?), trying DNS...");
         }
     }
-    
+
     // Fallback to regular DNS resolution
-    Serial.println("[MQTT] Attempting DNS resolution...");
+    ESP_LOGD(TAG, "Attempting DNS resolution...");
     IPAddress dnsIP;
     int result = WiFi.hostByName(hostname, dnsIP);
-    
+
     if (result == 1) {
-        Serial.print("[MQTT] DNS resolution successful: ");
-        Serial.println(dnsIP);
+        ESP_LOGD(TAG, "DNS resolution successful: %s", dnsIP.toString().c_str());
         return dnsIP;
     } else {
-        Serial.println("[MQTT] ERROR: DNS resolution failed");
-        Serial.println("[MQTT] Check: broker hostname correct, network has DNS, broker is reachable");
+        ESP_LOGE(TAG, "DNS resolution failed");
+        ESP_LOGE(TAG, "Check: broker hostname correct, network has DNS, broker is reachable");
         return IPAddress(0, 0, 0, 0);
     }
 }
 
 void MQTTController::buildTopics() {
-    String base = String(config.baseTopic);
-    if (base.length() == 0) {
-        base = "kinemachina/sfx";
+    const char* deviceId = config.deviceId;
+    if (strlen(deviceId) == 0) {
+        deviceId = "sfx-001";
     }
-    
-    String deviceId = String(config.deviceId);
-    if (deviceId.length() == 0) {
-        deviceId = "kinemachina_001";
-    }
-    
-    // Command topic (single topic, JSON dispatch)
-    snprintf(topicCommand, sizeof(topicCommand), "%s/%s/command", base.c_str(), deviceId.c_str());
 
-    // Status topics
-    snprintf(topicStatus, sizeof(topicStatus), "%s/%s/status", base.c_str(), deviceId.c_str());
-    snprintf(topicStatusAudio, sizeof(topicStatusAudio), "%s/%s/status/audio", base.c_str(), deviceId.c_str());
-    snprintf(topicStatusLED, sizeof(topicStatusLED), "%s/%s/status/led", base.c_str(), deviceId.c_str());
-    snprintf(topicStatusHealth, sizeof(topicStatusHealth), "%s/%s/status/health", base.c_str(), deviceId.c_str());
-    
-    // Response topic
-    snprintf(topicResponse, sizeof(topicResponse), "%s/%s/response", base.c_str(), deviceId.c_str());
-    
-    // LWT topic
-    snprintf(topicLWT, sizeof(topicLWT), "%s/%s/status/online", base.c_str(), deviceId.c_str());
+    // KRP v1.0 topics: krp/{deviceId}/...
+    snprintf(topicState, sizeof(topicState), "krp/%s/$state", deviceId);
+    snprintf(topicName, sizeof(topicName), "krp/%s/$name", deviceId);
+    snprintf(topicCapabilities, sizeof(topicCapabilities), "krp/%s/$capabilities", deviceId);
+    snprintf(topicCommand, sizeof(topicCommand), "krp/%s/command", deviceId);
+    snprintf(topicStatus, sizeof(topicStatus), "krp/%s/status", deviceId);
+    snprintf(topicStatusAudio, sizeof(topicStatusAudio), "krp/%s/status/audio", deviceId);
+    snprintf(topicStatusLED, sizeof(topicStatusLED), "krp/%s/status/led", deviceId);
+    snprintf(topicStatusHealth, sizeof(topicStatusHealth), "krp/%s/status/health", deviceId);
+    snprintf(topicResponse, sizeof(topicResponse), "krp/%s/response", deviceId);
 }
 
 void MQTTController::update() {
@@ -298,17 +278,12 @@ void MQTTController::update() {
 
     // Connection timeout: if we called connect() but got no response, treat as failure and allow retry
     if (connectionInProgress && (now - lastReconnectAttempt >= CONNECT_TIMEOUT_MS)) {
-        Serial.println("[MQTT] -------- Connection timeout --------");
-        Serial.print("[MQTT] No response from broker after ");
-        Serial.print(CONNECT_TIMEOUT_MS / 1000);
-        Serial.println("s - will retry with backoff");
+        ESP_LOGD(TAG, "-------- Connection timeout --------");
+        ESP_LOGD(TAG, "No response from broker after %lus - will retry with backoff", CONNECT_TIMEOUT_MS / 1000);
         connectionInProgress = false;
-        unsigned long prev = reconnectDelay;
         reconnectDelay = (reconnectDelay * 2 > RECONNECT_DELAY_MAX) ? RECONNECT_DELAY_MAX : (reconnectDelay * 2);
-        Serial.print("[MQTT] Next retry in ");
-        Serial.print(reconnectDelay / 1000);
-        Serial.println("s");
-        Serial.println("[MQTT] -------------------------------------");
+        ESP_LOGD(TAG, "Next retry in %lus", reconnectDelay / 1000);
+        ESP_LOGD(TAG, "-------------------------------------");
         lastReconnectAttempt = now;  // So next attempt waits reconnectDelay
     }
 
@@ -316,7 +291,7 @@ void MQTTController::update() {
     if (!connected && WiFi.status() != WL_CONNECTED) {
         if (now - lastWiFiWaitLog >= WIFI_WAIT_LOG_INTERVAL) {
             lastWiFiWaitLog = now;
-            Serial.println("[MQTT] Disconnected: waiting for WiFi before reconnecting");
+            ESP_LOGD(TAG, "Disconnected: waiting for WiFi before reconnecting");
         }
         return;
     }
@@ -354,13 +329,11 @@ void MQTTController::reconnect() {
                        (reconnectAttemptCount > 1 && (reconnectAttemptCount % RESOLVE_RETRY_INTERVAL) == 0);
     if (needResolve) {
         if (reconnectAttemptCount > 1) {
-            Serial.print("[MQTT] Re-resolving hostname (attempt #");
-            Serial.print(reconnectAttemptCount);
-            Serial.println(")");
+            ESP_LOGD(TAG, "Re-resolving hostname (attempt #%u)", reconnectAttemptCount);
         }
         brokerIP = resolveHostname(config.broker);
         if (brokerIP == IPAddress(0, 0, 0, 0)) {
-            Serial.println("[MQTT] ERROR: Broker hostname resolution failed - will retry after backoff");
+            ESP_LOGE(TAG, "Broker hostname resolution failed - will retry after backoff");
             connectionInProgress = false;
             lastReconnectAttempt = millis();  // Wait reconnectDelay before next attempt
             return;
@@ -369,24 +342,11 @@ void MQTTController::reconnect() {
         mqttClient.setServer(brokerIP, config.port);
     }
 
-    Serial.println("[MQTT] -------- Reconnect --------");
-    Serial.print("[MQTT] Attempt #");
-    Serial.print(reconnectAttemptCount);
-    Serial.print(", backoff ");
-    Serial.print(reconnectDelay / 1000);
-    Serial.println("s");
-    Serial.print("[MQTT] Target: ");
-    Serial.print(config.broker);
-    Serial.print(" -> ");
-    Serial.print(brokerIP);
-    Serial.print(":");
-    Serial.println(config.port);
-    if (strlen(config.username) > 0) {
-        Serial.println("[MQTT] Auth: username set");
-    } else {
-        Serial.println("[MQTT] Auth: none");
-    }
-    Serial.println("[MQTT] --------------------------");
+    ESP_LOGD(TAG, "-------- Reconnect --------");
+    ESP_LOGD(TAG, "Attempt #%u, backoff %lus", reconnectAttemptCount, reconnectDelay / 1000);
+    ESP_LOGD(TAG, "Target: %s -> %s:%d", config.broker, brokerIP.toString().c_str(), config.port);
+    ESP_LOGD(TAG, "Auth: %s", strlen(config.username) > 0 ? "username set" : "none");
+    ESP_LOGD(TAG, "--------------------------");
 
     if (mqttClient.connected()) {
         connected = true;
@@ -404,18 +364,13 @@ void MQTTController::onMqttConnect(bool sessionPresent) {
     reconnectDelay = RECONNECT_DELAY_MIN;  // Reset backoff on success
     reconnectAttemptCount = 0;             // Reset attempt count
 
-    Serial.println("[MQTT] -------- Connected --------");
-    Serial.print("[MQTT] Broker: ");
-    Serial.print(config.broker);
-    Serial.print(":");
-    Serial.println(config.port);
-    Serial.print("[MQTT] Session present: ");
-    Serial.println(sessionPresent ? "yes" : "no");
-    Serial.println("[MQTT] ---------------------------");
+    ESP_LOGI(TAG, "-------- Connected --------");
+    ESP_LOGI(TAG, "Broker: %s:%d", config.broker, config.port);
+    ESP_LOGI(TAG, "Session present: %s", sessionPresent ? "yes" : "no");
+    ESP_LOGI(TAG, "---------------------------");
 
-    // Publish online status
-    mqttClient.publish(topicLWT, 0, true, "online");
-    Serial.println("[MQTT] Published LWT: online");
+    // KRP v1.0 birth sequence
+    publishBirthSequence();
 
     // Subscribe to command topics
     subscribeToCommands();
@@ -423,34 +378,32 @@ void MQTTController::onMqttConnect(bool sessionPresent) {
     // Publish initial status
     publishStatus(true);
     publishHealth();
+
+    // Transition to ready state
+    mqttClient.publish(topicState, 1, true, "ready");
+    ESP_LOGI(TAG, "Published $state=ready");
 }
 
 void MQTTController::onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
     connectionInProgress = false;
     connected = false;
 
-    Serial.println("[MQTT] -------- Disconnect --------");
-    Serial.print("[MQTT] Reason code: ");
-    Serial.println((int)reason);
-    Serial.print("[MQTT] Reason: ");
-    Serial.println(getDisconnectReasonString(reason));
+    ESP_LOGI(TAG, "-------- Disconnect --------");
+    ESP_LOGI(TAG, "Reason code: %d", (int)reason);
+    ESP_LOGI(TAG, "Reason: %s", getDisconnectReasonString(reason));
 
     // Exponential backoff: increase delay for next attempt (cap at RECONNECT_DELAY_MAX)
     unsigned long previousDelay = reconnectDelay;
     reconnectDelay = (reconnectDelay * 2 > RECONNECT_DELAY_MAX) ? RECONNECT_DELAY_MAX : (reconnectDelay * 2);
     if (reconnectDelay != previousDelay) {
-        Serial.print("[MQTT] Backoff: next retry in ");
-        Serial.print(reconnectDelay / 1000);
-        Serial.println("s");
+        ESP_LOGI(TAG, "Backoff: next retry in %lus", reconnectDelay / 1000);
     }
-    Serial.println("[MQTT] ---------------------------");
+    ESP_LOGI(TAG, "---------------------------");
 }
 
 void MQTTController::subscribeToCommands() {
     uint16_t packetId = mqttClient.subscribe(topicCommand, config.qosCommands);
-    Serial.print("[MQTT] Subscribed to commands (packet ID: ");
-    Serial.print(packetId);
-    Serial.println(")");
+    ESP_LOGI(TAG, "Subscribed to commands (packet ID: %u)", packetId);
 }
 
 void MQTTController::onMqttMessage(char* topic, char* payload, AsyncMqttClientMessageProperties properties, size_t len, size_t index, size_t total) {
@@ -464,35 +417,34 @@ void MQTTController::onMqttMessage(char* topic, char* payload, AsyncMqttClientMe
         currentTopic[sizeof(currentTopic) - 1] = '\0';
         currentTotalLen = total;
     }
-    
+
     // Append this chunk to buffer (check bounds)
     size_t remainingSpace = sizeof(messageBuffer) - messageBufferLen - 1;
     size_t copyLen = (len < remainingSpace) ? len : remainingSpace;
-    
+
     if (copyLen > 0) {
         memcpy(messageBuffer + messageBufferLen, payload, copyLen);
         messageBufferLen += copyLen;
         messageBuffer[messageBufferLen] = '\0';
     }
-    
+
     // If this is the last chunk, enqueue the complete message
     if (index + len >= total) {
         // Log every received message
-        Serial.print("[MQTT] Message received topic=");
-        Serial.print(currentTopic);
-        Serial.print(" len=");
-        Serial.println(total);
+        ESP_LOGD(TAG, "Message received topic=%s len=%u", currentTopic, (unsigned)total);
         if (messageBufferLen > 0 && messageBufferLen <= 120) {
-            Serial.print("[MQTT] Payload: ");
-            for (size_t i = 0; i < messageBufferLen && i < 120; i++) {
+            // Build a sanitized copy for logging (replace non-printable chars with '.')
+            char sanitized[121];
+            size_t logLen = (messageBufferLen < 120) ? messageBufferLen : 120;
+            for (size_t i = 0; i < logLen; i++) {
                 char c = messageBuffer[i];
-                Serial.print((c >= 32 && c < 127) ? c : '.');
+                sanitized[i] = (c >= 32 && c < 127) ? c : '.';
             }
-            Serial.println();
+            sanitized[logLen] = '\0';
+            ESP_LOGD(TAG, "Payload: %s", sanitized);
         }
         if (strcmp(currentTopic, topicCommand) != 0) {
-            Serial.print("[MQTT] Unknown topic: ");
-            Serial.println(currentTopic);
+            ESP_LOGD(TAG, "Unknown topic: %s", currentTopic);
             messageBuffer[0] = '\0';
             messageBufferLen = 0;
             currentTopic[0] = '\0';
@@ -506,20 +458,20 @@ void MQTTController::onMqttMessage(char* topic, char* payload, AsyncMqttClientMe
         size_t payloadSize = messageBufferLen;
         if (payloadSize > sizeof(cmd.payload) - 1) {
             payloadSize = sizeof(cmd.payload) - 1;
-            Serial.println("[MQTT] WARNING: Payload truncated!");
+            ESP_LOGW(TAG, "Payload truncated!");
         }
         strncpy(cmd.payload, messageBuffer, payloadSize);
         cmd.payload[payloadSize] = '\0';
         cmd.payloadLen = payloadSize;
-        
+
         // Enqueue command (non-blocking, timeout 0)
         if (mqttCommandQueue != NULL) {
             BaseType_t result = xQueueSend(mqttCommandQueue, &cmd, 0);
             if (result != pdTRUE) {
-                Serial.println("[MQTT] WARNING: Command queue full, dropping message!");
+                ESP_LOGE(TAG, "Command queue full, dropping message!");
             }
         }
-        
+
         // Clear buffer
         messageBuffer[0] = '\0';
         messageBufferLen = 0;
@@ -535,19 +487,19 @@ void MQTTController::mqttTaskWrapper(void* parameter) {
 }
 
 void MQTTController::mqttTask() {
-    Serial.println("[MQTT] MQTT task started on Core 1");
-    
+    ESP_LOGI(TAG, "MQTT task started on Core 1");
+
     MQTTCommand cmd;
-    
+
     while (true) {
         // Wait for command from queue (blocking)
-        if (mqttCommandQueue != NULL && 
+        if (mqttCommandQueue != NULL &&
             xQueueReceive(mqttCommandQueue, &cmd, portMAX_DELAY) == pdTRUE) {
-            
+
             // Process the command
             processCommand(cmd);
         }
-        
+
         // Small delay to prevent watchdog issues
         vTaskDelay(pdMS_TO_TICKS(10));
     }
@@ -557,8 +509,7 @@ void MQTTController::processCommand(const MQTTCommand& cmd) {
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, cmd.payload, cmd.payloadLen);
     if (error) {
-        Serial.print("[MQTT] JSON parse error: ");
-        Serial.println(error.c_str());
+        ESP_LOGE(TAG, "JSON parse error: %s", error.c_str());
         publishResponse("unknown", false, "Invalid JSON");
         return;
     }
@@ -603,24 +554,23 @@ void MQTTController::onMqttMessageWrapper(char* topic, char* payload, AsyncMqttC
 }
 
 void MQTTController::handleCommandTrigger(const char* payload, size_t len) {
-    Serial.println("[MQTT] Trigger command received");
-    
+    ESP_LOGI(TAG, "Trigger command received");
+
     if (!audioController || (!ledStripController && !ledMatrixController) || !settingsController) {
         publishResponse("trigger", false, "Controller not available");
         return;
     }
-    
+
     // Parse JSON
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, payload, len);
-    
+
     if (error) {
-        Serial.print("[MQTT] JSON parse error: ");
-        Serial.println(error.c_str());
+        ESP_LOGE(TAG, "JSON parse error: %s", error.c_str());
         publishResponse("trigger", false, "Invalid JSON", nullptr);
         return;
     }
-    
+
     // Extract parameters
     String category = doc["category"].is<String>() ? doc["category"].as<String>() : "";
     String effectName = "";
@@ -642,7 +592,7 @@ void MQTTController::handleCommandTrigger(const char* payload, size_t len) {
     // Find effect by category or name
     SettingsController::Effect effect;
     bool effectFound = false;
-    
+
     // Only search by name if effectName is not empty and not "null"
     if (effectName.length() > 0 && effectName != "null") {
         effectFound = settingsController->getEffectByName(effectName.c_str(), &effect);
@@ -666,7 +616,7 @@ void MQTTController::handleCommandTrigger(const char* payload, size_t len) {
     } else if (category.length() > 0) {
         SettingsController::Effect categoryEffects[32];
         int count = settingsController->getEffectsByCategory(category.c_str(), categoryEffects, 32);
-        
+
         if (count > 0) {
             int index = random(count);
             effect = categoryEffects[index];
@@ -676,21 +626,21 @@ void MQTTController::handleCommandTrigger(const char* payload, size_t len) {
         publishResponse("trigger", false, "Must specify category or effect", requestId.length() > 0 ? requestId.c_str() : nullptr);
         return;
     }
-    
+
     if (!effectFound) {
         publishResponse("trigger", false, "Effect not found", requestId.length() > 0 ? requestId.c_str() : nullptr);
         return;
     }
-    
+
     // Apply optional parameters
     bool audioPlayed = false;
     bool ledStarted = false;
-    
+
     if (audioVolume >= 0 && audioVolume <= 21) {
         audioController->setVolume(audioVolume);
         settingsController->saveVolume(audioVolume);
     }
-    
+
     if (ledBrightness >= 0 && ledBrightness <= 255) {
         if (ledStripController) {
             ledStripController->setBrightness((uint8_t)ledBrightness);
@@ -700,63 +650,57 @@ void MQTTController::handleCommandTrigger(const char* payload, size_t len) {
         }
         settingsController->saveBrightness((uint8_t)ledBrightness);
     }
-    
+
     // Execute effect
     if (effect.hasAudio) {
         if (audioController->playFile(effect.audioFile)) {
             audioPlayed = true;
         }
     }
-    
+
     if (effect.hasLED) {
         if (dispatchLEDEffect(settingsController, effect.ledEffectName, ledStripController, ledMatrixController)) {
             ledStarted = true;
         }
     }
-    
+
     // Build and publish response
     JsonDocument responseDoc;
-    responseDoc["status"] = "success";
+    responseDoc["status"] = "ok";
     responseDoc["command"] = "trigger";
     responseDoc["effect"] = effect.name;
     responseDoc["category"] = effect.category;
-    responseDoc["executed"] = true;
     responseDoc["audio_played"] = audioPlayed;
     responseDoc["led_started"] = ledStarted;
-    responseDoc["message"] = "Effect triggered successfully";
     responseDoc["timestamp"] = millis();
     if (requestId.length() > 0) {
         responseDoc["request_id"] = requestId;
     }
-    responseDoc["error"] = nullptr;
-    
+
     String response;
     serializeJson(responseDoc, response);
     mqttClient.publish(topicResponse, config.qosCommands, false, response.c_str());
-    Serial.print("[MQTT] Trigger completed: effect=");
-    Serial.print(effect.name);
-    Serial.print(" category=");
-    Serial.println(effect.category);
-    
+    ESP_LOGI(TAG, "Trigger completed: effect=%s category=%s", effect.name, effect.category);
+
     // Publish updated status
     publishStatus(true);
 }
 
 void MQTTController::handleCommandStop(const char* payload, size_t len) {
-    Serial.println("[MQTT] Stop command received");
-    
+    ESP_LOGI(TAG, "Stop command received");
+
     // Stop all audio and LED effects
     if (audioController) {
         audioController->stop();
     }
-    
+
     if (ledStripController) {
         ledStripController->stopEffect();
     }
     if (ledMatrixController) {
         ledMatrixController->stopEffect();
     }
-    
+
     // Parse request ID if present
     String requestId = "";
     if (len > 0) {
@@ -766,83 +710,81 @@ void MQTTController::handleCommandStop(const char* payload, size_t len) {
             requestId = doc["request_id"].as<String>();
         }
     }
-    
+
     // Build and publish response
     JsonDocument responseDoc;
-    responseDoc["status"] = "success";
+    responseDoc["status"] = "ok";
     responseDoc["command"] = "stop";
-    responseDoc["message"] = "All effects stopped";
     responseDoc["timestamp"] = millis();
     if (requestId.length() > 0) {
         responseDoc["request_id"] = requestId;
     }
-    
+
     String response;
     serializeJson(responseDoc, response);
     mqttClient.publish(topicResponse, config.qosCommands, false, response.c_str());
-    Serial.println("[MQTT] Stop completed");
-    
+    ESP_LOGI(TAG, "Stop completed");
+
     // Publish updated status
     publishStatus(true);
 }
 
 void MQTTController::handleCommandVolume(const char* payload, size_t len) {
-    Serial.println("[MQTT] Volume command received");
-    
+    ESP_LOGI(TAG, "Volume command received");
+
     if (!audioController) {
         publishResponse("volume", false, "Audio controller not available");
         return;
     }
-    
+
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, payload, len);
-    
+
     if (error) {
         publishResponse("volume", false, "Invalid JSON");
         return;
     }
-    
+
     int volume = doc["volume"].is<int>() ? doc["volume"].as<int>() : -1;
     String requestId = doc["request_id"].is<String>() ? doc["request_id"].as<String>() : "";
-    
+
     if (volume < 0 || volume > 21) {
         publishResponse("volume", false, "Volume must be 0-21", requestId.length() > 0 ? requestId.c_str() : nullptr);
         return;
     }
-    
+
     audioController->setVolume(volume);
     settingsController->saveVolume(volume);
-    
-    Serial.print("[MQTT] Volume set to ");
-    Serial.println(volume);
+
+    ESP_LOGI(TAG, "Volume set to %d", volume);
     publishResponse("volume", true, "Volume set successfully", requestId.length() > 0 ? requestId.c_str() : nullptr);
     publishStatus(true);
 }
 
 void MQTTController::handleCommandBrightness(const char* payload, size_t len) {
-    Serial.println("[MQTT] Brightness command received");
-    
+    ESP_LOGI(TAG, "Brightness command received");
+
     if (!ledStripController && !ledMatrixController) {
         publishResponse("brightness", false, "LED controllers not available");
         return;
     }
-    
+
     JsonDocument doc;
     DeserializationError error = deserializeJson(doc, payload, len);
-    
+
     if (error) {
         publishResponse("brightness", false, "Invalid JSON");
         return;
     }
-    
+
     int brightness = doc["brightness"].is<int>() ? doc["brightness"].as<int>() : -1;
     String requestId = doc["request_id"].is<String>() ? doc["request_id"].as<String>() : "";
-    
+
     if (brightness < 0 || brightness > 255) {
         publishResponse("brightness", false, "Brightness must be 0-255", requestId.length() > 0 ? requestId.c_str() : nullptr);
         return;
     }
-    
+
     if (ledStripController) {
         ledStripController->setBrightness((uint8_t)brightness);
     }
@@ -850,15 +792,14 @@ void MQTTController::handleCommandBrightness(const char* payload, size_t len) {
         ledMatrixController->setBrightness((uint8_t)brightness);
     }
     settingsController->saveBrightness((uint8_t)brightness);
-    
-    Serial.print("[MQTT] Brightness set to ");
-    Serial.println(brightness);
+
+    ESP_LOGI(TAG, "Brightness set to %d", brightness);
     publishResponse("brightness", true, "Brightness set successfully", requestId.length() > 0 ? requestId.c_str() : nullptr);
     publishStatus(true);
 }
 
 void MQTTController::handleCommandBassMono(const char* payload, size_t len) {
-    Serial.println("[MQTT] Bass mono command received");
+    ESP_LOGI(TAG, "Bass mono command received");
 
     if (!bassMonoProcessor) {
         publishResponse("bass_mono", false, "Bass mono processor not available");
@@ -896,80 +837,167 @@ void MQTTController::handleCommandBassMono(const char* payload, size_t len) {
         }
     }
 
-    Serial.print("[MQTT] Bass mono: enabled=");
-    Serial.print(bassMonoProcessor->isEnabled() ? "true" : "false");
-    Serial.print(", crossover=");
-    Serial.println(bassMonoProcessor->getCrossoverHz());
+    ESP_LOGI(TAG, "Bass mono: enabled=%s, crossover=%u", bassMonoProcessor->isEnabled() ? "true" : "false", bassMonoProcessor->getCrossoverHz());
     publishResponse("bass_mono", true, "Bass mono settings updated", requestId.length() > 0 ? requestId.c_str() : nullptr);
     publishStatus(true);
 }
 
+void MQTTController::publishBirthSequence() {
+    if (!connected) {
+        return;
+    }
+
+    // 1. $state → "online" (retained, QoS 1)
+    mqttClient.publish(topicState, 1, true, "online");
+    ESP_LOGI(TAG, "Published $state=online");
+
+    // 2. $name → deviceName (retained, QoS 1)
+    mqttClient.publish(topicName, 1, true, config.deviceName);
+    ESP_LOGI(TAG, "Published $name=%s", config.deviceName);
+
+    // 3. $capabilities → JSON (retained, QoS 1)
+    JsonDocument doc;
+    doc["device_id"] = config.deviceId;
+    doc["device_type"] = "sfx";
+    doc["device_class"] = "sfx";
+    doc["name"] = config.deviceName;
+    doc["platform"] = "esp32s3";
+    doc["protocol_version"] = "1.0";
+
+    // Build capabilities array
+    JsonArray caps = doc["capabilities"].to<JsonArray>();
+
+    // Audio capability: iterate effects from settingsController
+    JsonObject audioCap = caps.add<JsonObject>();
+    audioCap["type"] = "audio";
+    JsonArray audioItems = audioCap["items"].to<JsonArray>();
+
+    if (settingsController) {
+        int effectCount = settingsController->getEffectCount();
+        for (int i = 0; i < effectCount; i++) {
+            SettingsController::Effect effect;
+            if (settingsController->getEffect(i, &effect) && effect.hasAudio) {
+                JsonObject item = audioItems.add<JsonObject>();
+                item["id"] = String(effect.name);
+                if (strlen(effect.category) > 0) {
+                    item["category"] = String(effect.category);
+                }
+            }
+        }
+    }
+
+    JsonObject audioParams = audioCap["params"].to<JsonObject>();
+    JsonObject volumeParam = audioParams["volume"].to<JsonObject>();
+    volumeParam["min"] = 0;
+    volumeParam["max"] = 21;
+
+    // Lighting capability: known strip + matrix effect names
+    JsonObject lightCap = caps.add<JsonObject>();
+    lightCap["type"] = "lighting";
+    JsonArray lightItems = lightCap["items"].to<JsonArray>();
+
+    // Strip effects
+    const char* stripEffects[] = {
+        "atomic_breath", "gravity_beam", "fire_breath", "electric_attack",
+        "battle_damage", "victory", "idle", "rainbow", "rainbow_chase",
+        "color_wipe", "theater_chase", "pulse", "breathing", "meteor",
+        "twinkle", "water", "strobe", "radial_out", "radial_in",
+        "spiral", "rotating_rainbow", "circular_chase", "radial_gradient"
+    };
+    for (const char* name : stripEffects) {
+        JsonObject item = lightItems.add<JsonObject>();
+        item["id"] = name;
+        item["target"] = "strip";
+    }
+
+    // Matrix effects
+    const char* matrixEffects[] = {
+        "beam_attack", "explosion", "impact_wave", "damage_flash",
+        "block_shield", "dodge_trail", "charge_up", "finisher_beam",
+        "gravity_beam_attack", "electric_attack_matrix", "victory_dance",
+        "taunt_pattern", "pose_strike", "celebration_wave", "confetti",
+        "heart_eyes", "power_up_aura", "transition_fade", "game_over_chiron",
+        "cylon_eye", "perlin_inferno", "emp_lightning", "game_of_life",
+        "plasma_clouds", "digital_fireflies", "matrix_rain", "dance_floor",
+        "alien_control_panel", "atomic_breath_minus_one", "atomic_breath_mushroom",
+        "transporter_tos"
+    };
+    for (const char* name : matrixEffects) {
+        JsonObject item = lightItems.add<JsonObject>();
+        item["id"] = name;
+        item["target"] = "matrix";
+    }
+
+    JsonObject lightParams = lightCap["params"].to<JsonObject>();
+    JsonObject brightnessParam = lightParams["brightness"].to<JsonObject>();
+    brightnessParam["min"] = 0;
+    brightnessParam["max"] = 255;
+
+    String capStr;
+    serializeJson(doc, capStr);
+    mqttClient.publish(topicCapabilities, 1, true, capStr.c_str());
+    ESP_LOGI(TAG, "Published $capabilities (%u bytes)", (unsigned)capStr.length());
+}
+
 void MQTTController::publishResponse(const char* command, bool success, const char* message, const char* requestId) {
     JsonDocument doc;
-    doc["status"] = success ? "success" : "error";
+    doc["status"] = success ? "ok" : "error";
     doc["command"] = command;
-    doc["executed"] = success;
-    doc["message"] = message;
     doc["timestamp"] = millis();
     if (requestId) {
         doc["request_id"] = requestId;
     }
-    if (!success) {
-        doc["error"] = message;
+    if (!success && message) {
+        doc["message"] = message;
     }
-    
+
     String response;
     serializeJson(doc, response);
     mqttClient.publish(topicResponse, config.qosCommands, false, response.c_str());
-    Serial.print("[MQTT] Published response command=");
-    Serial.print(command);
-    Serial.print(" success=");
-    Serial.println(success ? "true" : "false");
+    ESP_LOGI(TAG, "Published response command=%s success=%s", command, success ? "true" : "false");
 }
 
 void MQTTController::publishStatus(bool force) {
     if (!connected) {
         return;
     }
-    
+
     // Get current state
     bool audioPlaying = audioController ? audioController->isPlaying() : false;
     int volume = audioController ? audioController->getVolume() : 0;
     uint8_t brightness = ledStripController ? ledStripController->getBrightness() : (ledMatrixController ? ledMatrixController->getBrightness() : 0);
     bool ledRunning = (ledStripController && ledStripController->isEffectRunning()) || (ledMatrixController && ledMatrixController->isEffectRunning());
     int ledEffect = ledStripController ? (int)ledStripController->getCurrentEffect() : (ledMatrixController ? (int)ledMatrixController->getCurrentEffect() : -1);
-    
+
     // Check for state changes (before updating last state)
     bool audioChanged = (audioPlaying != lastAudioPlaying);
     bool volumeChanged = (volume != lastVolume);
     bool brightnessChanged = (brightness != lastBrightness);
     bool ledChanged = (ledRunning != lastLEDRunning) || (ledEffect != lastLEDEffect);
-    
+
     bool stateChanged = force || audioChanged || volumeChanged || brightnessChanged || ledChanged;
-    
+
     if (!stateChanged) {
         return; // No changes, don't publish
     }
-    
-    Serial.print("[MQTT] Publishing status");
-    if (force) Serial.print(" (forced)");
-    Serial.println();
+
+    ESP_LOGD(TAG, "Publishing status%s", force ? " (forced)" : "");
     // Build full status JSON (same format as HTTP API)
     JsonDocument doc;
     doc["status"] = "success";
-    
+
     JsonObject audio = doc["audio"].to<JsonObject>();
     audio["playing"] = audioPlaying;
     audio["volume"] = volume;
     if (audioController) {
         audio["current_file"] = audioController->getCurrentFile();
     }
-    
+
     JsonObject led = doc["led"].to<JsonObject>();
     led["effect_running"] = ledRunning;
     led["current_effect"] = ledEffect;
     led["brightness"] = brightness;
-    
+
     if (bassMonoProcessor) {
         JsonObject bassMono = doc["bass_mono"].to<JsonObject>();
         bassMono["enabled"] = bassMonoProcessor->isEnabled();
@@ -983,14 +1011,14 @@ void MQTTController::publishStatus(bool force) {
 
     doc["timestamp"] = millis();
     doc["free_heap"] = ESP.getFreeHeap();
-    
+
     String statusJson;
     serializeJson(doc, statusJson);
-    
+
     // Publish to main status topic (retained)
     mqttClient.publish(topicStatus, config.qosStatus, true, statusJson.c_str());
-    Serial.println("[MQTT] Published status");
-    
+    ESP_LOGD(TAG, "Published status");
+
     // Publish to specific status topics if changed
     if (audioChanged || volumeChanged || force) {
         JsonDocument audioDoc;
@@ -1000,9 +1028,9 @@ void MQTTController::publishStatus(bool force) {
         String audioJson;
         serializeJson(audioDoc, audioJson);
         mqttClient.publish(topicStatusAudio, config.qosStatus, false, audioJson.c_str());
-        Serial.println("[MQTT] Published status/audio");
+        ESP_LOGD(TAG, "Published status/audio");
     }
-    
+
     if (ledChanged || brightnessChanged || force) {
         JsonDocument ledDoc;
         ledDoc["effect_running"] = ledRunning;
@@ -1012,9 +1040,9 @@ void MQTTController::publishStatus(bool force) {
         String ledJson;
         serializeJson(ledDoc, ledJson);
         mqttClient.publish(topicStatusLED, config.qosStatus, false, ledJson.c_str());
-        Serial.println("[MQTT] Published status/led");
+        ESP_LOGD(TAG, "Published status/led");
     }
-    
+
     // Update last state (after publishing)
     lastAudioPlaying = audioPlaying;
     lastVolume = volume;
@@ -1027,30 +1055,30 @@ void MQTTController::publishHealth() {
     if (!connected) {
         return;
     }
-    
+
     bool healthy = true;
     String issues = "";
-    
+
     if (!audioController) {
         healthy = false;
         issues += "audio_controller_missing;";
     }
-    
+
     if (!ledStripController && !ledMatrixController) {
         healthy = false;
         issues += "led_controllers_missing;";
     }
-    
+
     if (!settingsController) {
         healthy = false;
         issues += "settings_controller_missing;";
     }
-    
+
     if (WiFi.status() != WL_CONNECTED) {
         healthy = false;
         issues += "wifi_disconnected;";
     }
-    
+
     JsonDocument doc;
     doc["status"] = healthy ? "healthy" : "unhealthy";
     doc["healthy"] = healthy;
@@ -1058,10 +1086,9 @@ void MQTTController::publishHealth() {
     doc["uptime"] = millis();
     doc["free_heap"] = ESP.getFreeHeap();
     doc["timestamp"] = millis();
-    
+
     String healthJson;
     serializeJson(doc, healthJson);
     mqttClient.publish(topicStatusHealth, config.qosStatus, false, healthJson.c_str());
-    Serial.print("[MQTT] Published health status=");
-    Serial.println(healthy ? "healthy" : "unhealthy");
+    ESP_LOGD(TAG, "Published health status=%s", healthy ? "healthy" : "unhealthy");
 }

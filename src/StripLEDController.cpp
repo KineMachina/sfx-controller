@@ -1,6 +1,9 @@
 #include "StripLEDController.h"
 #include "LEDMath.h"
 #include <math.h>
+#include "RuntimeLog.h"
+
+static const char* TAG = "LEDStrip";
 
 StripLEDController::StripLEDController(int pin, int numPixels)
     : pin(pin), numPixels(numPixels),
@@ -21,8 +24,8 @@ StripLEDController::~StripLEDController() {
 }
 
 bool StripLEDController::begin() {
-    Serial.println("Initializing NeoPixel LED strip...");
-    
+    ESP_LOGI(TAG, "Initializing NeoPixel LED strip...");
+
     pixels->begin();
     setPixelBrightness(currentBrightness);
     showPixels(); // Initialize all pixels to 'off'
@@ -32,11 +35,11 @@ bool StripLEDController::begin() {
     ledStatusQueue = xQueueCreate(5, sizeof(LEDStatus));
     
     if (ledCommandQueue == NULL || ledStatusQueue == NULL) {
-        Serial.println("[StripLED] ERROR: Failed to create queues!");
+        ESP_LOGE(TAG, "Failed to create queues!");
         return false;
     }
-    
-    Serial.println("[StripLED] Queues created successfully");
+
+    ESP_LOGI(TAG, "Queues created successfully");
     
     // Start the LED task on Core 1
     xTaskCreatePinnedToCore(
@@ -49,9 +52,7 @@ bool StripLEDController::begin() {
         1   // Core 1
     );
     
-    Serial.print("NeoPixel LED strip initialized: ");
-    Serial.print(numPixels);
-    Serial.println(" pixels");
+    ESP_LOGI(TAG, "NeoPixel LED strip initialized: %d pixels", numPixels);
     
     return true;
 }
@@ -62,7 +63,7 @@ void StripLEDController::ledTaskWrapper(void* parameter) {
 }
 
 void StripLEDController::ledTask() {
-    Serial.println("[StripLED] LED task started on Core 1");
+    ESP_LOGI(TAG, "LED task started on Core 1");
     
     LEDCommand cmd;
     LEDStatus status;
@@ -87,12 +88,7 @@ void StripLEDController::ledTask() {
                         effectStartCallback(cmd.effect, effectStartCallbackData);
                     }
                     
-                    Serial.print("[StripLED] Effect started: ");
-                    Serial.print(cmd.effect);
-                    Serial.print(", brightness: ");
-                    Serial.print(currentBrightness);
-                    Serial.print(", numPixels: ");
-                    Serial.println(numPixels);
+                    ESP_LOGI(TAG, "Effect started: %d, brightness: %u, numPixels: %d", cmd.effect, currentBrightness, numPixels);
                     break;
                 }
                 
@@ -106,7 +102,7 @@ void StripLEDController::ledTask() {
                     setAllPixels(0);
                     showPixels();
                     
-                    Serial.println("[StripLED] Effect stopped - all LEDs off");
+                    ESP_LOGI(TAG, "Effect stopped - all LEDs off");
                     break;
                 }
                 
@@ -114,8 +110,7 @@ void StripLEDController::ledTask() {
                     // Handle brightness command
                     currentBrightness = cmd.brightness;
                     setPixelBrightness(cmd.brightness);
-                    Serial.print("[StripLED] Brightness set to: ");
-                    Serial.println(cmd.brightness);
+                    ESP_LOGI(TAG, "Brightness set to: %u", cmd.brightness);
                     break;
                 }
             }
@@ -152,18 +147,18 @@ void StripLEDController::ledTask() {
 
 void StripLEDController::startEffect(EffectType effect) {
     if (ledCommandQueue == NULL) {
-        Serial.println("[StripLED] ERROR: Command queue not initialized");
+        ESP_LOGE(TAG, "Command queue not initialized");
         return;
     }
-    
+
     // Create command
     LEDCommand cmd;
     cmd.type = LEDCommand::CMD_START_EFFECT;
     cmd.effect = effect;
-    
+
     // Send command to queue (non-blocking with timeout)
     if (xQueueSend(ledCommandQueue, &cmd, pdMS_TO_TICKS(100)) != pdTRUE) {
-        Serial.println("[StripLED] WARNING: Failed to send start effect command (queue full)");
+        ESP_LOGW(TAG, "Failed to send start effect command (queue full)");
         // Fallback: set directly (for backward compatibility)
         currentEffect = effect;
         effectRunning = true;
@@ -182,17 +177,17 @@ void StripLEDController::setEffectStartCallback(EffectStartCallback callback, vo
 
 void StripLEDController::stopEffect() {
     if (ledCommandQueue == NULL) {
-        Serial.println("[StripLED] ERROR: Command queue not initialized");
+        ESP_LOGE(TAG, "Command queue not initialized");
         return;
     }
-    
+
     // Create stop command
     LEDCommand cmd;
     cmd.type = LEDCommand::CMD_STOP_EFFECT;
-    
+
     // Send command to queue (non-blocking)
     if (xQueueSend(ledCommandQueue, &cmd, pdMS_TO_TICKS(100)) != pdTRUE) {
-        Serial.println("[StripLED] WARNING: Failed to send stop effect command (queue full)");
+        ESP_LOGW(TAG, "Failed to send stop effect command (queue full)");
         // Fallback: stop directly and turn off LEDs
         effectRunning = false;
         currentEffect = EFFECT_IDLE;

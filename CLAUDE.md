@@ -103,9 +103,61 @@ All source in `src/`. Each controller is a `.h`/`.cpp` pair:
 
 Single command topic `{base_topic}/{device_id}/command` with JSON dispatch (`"command"` field selects the action). Status sub-topics (`status/audio`, `status/led`, `status/health`) are published separately. See `MQTT_API.md` for full protocol reference.
 
+## Logging
+
+**All diagnostic/debug output MUST use ESP-IDF structured logging.** Never use raw `Serial.print` for diagnostics.
+
+```cpp
+#include "RuntimeLog.h"
+static const char* TAG = "MyController";
+
+ESP_LOGE(TAG, "Critical failure: %s", error);     // Errors
+ESP_LOGW(TAG, "Non-fatal issue: %s", warning);     // Warnings
+ESP_LOGI(TAG, "Connected to %s:%d", host, port);   // Normal events
+ESP_LOGD(TAG, "Heap: %u bytes", freeHeap);          // Periodic/verbose
+```
+
+### Log Levels
+
+| Level | Use for | Examples |
+|-------|---------|---------|
+| ERROR | Critical failures requiring attention | Init failures, hardware errors, queue creation failures |
+| WARN | Degraded operation, non-fatal issues | Missing optional components, using defaults, config warnings |
+| INFO | Normal operational events | Startup, connections, commands received, config loaded |
+| DEBUG | Periodic status, detailed operations | Heartbeat, reconnect attempts, status publishing, loop restarts |
+
+### Rules
+
+- **`Serial.print` is ONLY for interactive serial command responses** in `main.cpp` (direct replies to user-typed commands like `status`, `wifi`, `dir`). Everything else uses `ESP_LOGx`.
+- Each `.cpp` file defines `static const char* TAG = "Name";` at file scope.
+- **Include `"RuntimeLog.h"` (not `<esp_log.h>`)** in all project `.cpp` files. This header adds runtime level checking that Arduino-ESP32's default macros lack. The `USE_ESP_IDF_LOG` flag can't be used globally because it breaks third-party libraries.
+- Compile-time max level is set via `-DCORE_DEBUG_LEVEL=4` (DEBUG) in `platformio.ini`.
+- Runtime level is controlled by the global `runtimeLogLevel` variable (set via `log` serial command). The `RuntimeLog.h` macros check this before printing.
+- Consolidate multi-line output into single `ESP_LOGx` calls with printf format strings.
+- Use `.c_str()` for Arduino `String`, `.toString().c_str()` for `IPAddress`.
+
+### TAG Names
+
+| File | TAG |
+|------|-----|
+| main.cpp | `"Main"` |
+| AudioController.cpp | `"Audio"` |
+| HTTPServerController.cpp | `"HTTP"` |
+| MQTTController.cpp | `"MQTT"` |
+| StripLEDController.cpp | `"LEDStrip"` |
+| MatrixLEDController.cpp | `"LEDMatrix"` |
+| SettingsController.cpp | `"Settings"` |
+| DemoController.cpp | `"Demo"` |
+
+## Serial Commands
+
+Interactive serial console at 115200 baud. Commands: `play`, `stop`, `volume`, `status`, `dir`, `wifi`, `mqtt`, `log`, `reboot`. WiFi/MQTT can be configured via serial (for bootstrap when no WiFi is available yet).
+
+The `log` command controls runtime log level: `log off`, `log error`, `log warn`, `log info` (default), `log debug`.
+
 ## Conventions
 
 - LED effects are string-identified (e.g., `"atomic_breath"`, `"beam_attack"`) and dispatched via if/else chains in the LED controllers
 - Audio files are paths on the SD card (e.g., `/sounds/roar.mp3`)
 - Volume range: 0–21; brightness range: 0–255
-- WiFi and MQTT are configured only through the web UI (stored in Preferences), not config.json
+- WiFi and MQTT are configured through the web UI or serial commands (stored in Preferences), not config.json

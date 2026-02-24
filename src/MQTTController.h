@@ -49,14 +49,16 @@ private:
     static const unsigned long WIFI_WAIT_LOG_INTERVAL = 60000;  // Log "waiting for WiFi" at most every 60s
     static const int RESOLVE_RETRY_INTERVAL = 5;  // Re-resolve hostname every N failed attempts
     
-    // Topic strings (built from config)
+    // KRP topic strings (built from config)
+    char topicState[256];        // krp/{deviceId}/$state
+    char topicName[256];         // krp/{deviceId}/$name
+    char topicCapabilities[256]; // krp/{deviceId}/$capabilities
     char topicCommand[256];
     char topicStatus[256];
     char topicStatusAudio[256];
     char topicStatusLED[256];
     char topicStatusHealth[256];
     char topicResponse[256];
-    char topicLWT[256];
     
     // State tracking for change detection
     bool lastAudioPlaying;
@@ -102,6 +104,7 @@ private:
     void handleCommandVolume(const char* payload, size_t len);
     void handleCommandBrightness(const char* payload, size_t len);
     void handleCommandBassMono(const char* payload, size_t len);
+    void publishBirthSequence();
     void publishResponse(const char* command, bool success, const char* message, const char* requestId = nullptr);
     void publishStatus(bool force = false);
     void publishHealth();

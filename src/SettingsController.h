@@ -250,6 +250,7 @@ public:
         char password[64];
         char deviceId[32];
         char baseTopic[64];
+        char deviceName[64];
         int qosCommands;
         int qosStatus;
         int keepalive;

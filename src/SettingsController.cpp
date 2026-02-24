@@ -1,4 +1,7 @@
 #include "SettingsController.h"
+#include "RuntimeLog.h"
+
+static const char* TAG = "Settings";
 
 const char* SettingsController::NAMESPACE = "kinemachina";
 const char* SettingsController::CONFIG_FILE = "/config.json";
@@ -21,21 +24,21 @@ SettingsController::SettingsController() : effectCount(0),
 
 bool SettingsController::begin(SemaphoreHandle_t sdMutex) {
     if (!preferences.begin(NAMESPACE, false)) {
-        Serial.println("[Settings] Failed to open preferences namespace");
+        ESP_LOGE(TAG, "Failed to open preferences namespace");
         return false;
     }
-    
+
     // Try to load from SD card config file first
     bool configLoaded = loadFromConfigFile(sdMutex);
     if (configLoaded) {
-        Serial.println("[Settings] Loaded settings from config.json");
+        ESP_LOGI(TAG, "Loaded settings from config.json");
     } else {
-        Serial.println("[Settings] No config.json found, using Preferences/defaults");
+        ESP_LOGW(TAG, "No config.json found, using Preferences/defaults");
         // Load effects from Preferences if config.json wasn't loaded
         loadEffectsFromPreferences();
     }
-    
-    Serial.println("[Settings] Settings controller initialized");
+
+    ESP_LOGI(TAG, "Settings controller initialized");
     return true;
 }
 
@@ -45,7 +48,7 @@ bool SettingsController::loadFromConfigFile(SemaphoreHandle_t sdMutex) {
     // Take mutex if provided
     if (sdMutex != NULL) {
         if (xSemaphoreTake(sdMutex, pdMS_TO_TICKS(2000)) != pdTRUE) {
-            Serial.println("[Settings] Timeout waiting for SD card mutex");
+            ESP_LOGE(TAG, "Timeout waiting for SD card mutex");
             return false;
         }
         mutexTaken = true;
@@ -119,40 +122,35 @@ bool SettingsController::loadFromConfigFile(SemaphoreHandle_t sdMutex) {
                         else if (modeStr == "led_only") mode = 2;
                         else if (modeStr == "effects") mode = 3;
                         bootDemoMode = mode;
-                        Serial.print("[Settings] Demo mode: ");
-                        Serial.println(modeStr);
+                        ESP_LOGI(TAG, "Demo mode: %s", modeStr.c_str());
                     }
                     if (demo["order"].is<String>()) {
                         String orderStr = demo["order"].as<String>();
                         orderStr.toLowerCase();
                         int order = (orderStr == "sequential" || orderStr == "order") ? 1 : 0;
                         bootDemoOrder = order;
-                        Serial.print("[Settings] Demo order: ");
-                        Serial.println(orderStr);
+                        ESP_LOGI(TAG, "Demo order: %s", orderStr.c_str());
                     }
                 }
                 
                 // Load effects configuration
                 if (doc["effects"].is<JsonObject>()) {
-                    Serial.println("[Settings] Found 'effects' key in config.json");
+                    ESP_LOGI(TAG, "Found 'effects' key in config.json");
                     JsonObject effectsObj = doc["effects"];
-                    Serial.print("[Settings] Effects object size: ");
-                    Serial.println(effectsObj.size());
+                    ESP_LOGD(TAG, "Effects object size: %d", effectsObj.size());
                     loadEffectsFromConfig(effectsObj);
-                    Serial.print("[Settings] After loading, effectCount: ");
-                    Serial.println(effectCount);
+                    ESP_LOGI(TAG, "After loading, effectCount: %d", effectCount);
                 } else {
-                    Serial.println("[Settings] No 'effects' key found in config.json");
+                    ESP_LOGW(TAG, "No 'effects' key found in config.json");
                 }
                 
                 success = true;
-                Serial.println("[Settings] Successfully loaded config.json");
+                ESP_LOGI(TAG, "Successfully loaded config.json");
             } else {
-                Serial.print("[Settings] Failed to parse config.json: ");
-                Serial.println(error.c_str());
+                ESP_LOGE(TAG, "Failed to parse config.json: %s", error.c_str());
             }
         } else {
-            Serial.println("[Settings] Failed to open config.json");
+            ESP_LOGE(TAG, "Failed to open config.json");
         }
     }
     
@@ -166,8 +164,7 @@ bool SettingsController::loadFromConfigFile(SemaphoreHandle_t sdMutex) {
 
 void SettingsController::saveVolume(int volume) {
     bootVolume = volume;
-    Serial.print("[Settings] Saved volume (in-memory): ");
-    Serial.println(volume);
+    ESP_LOGI(TAG, "Saved volume (in-memory): %d", volume);
 }
 
 int SettingsController::loadVolume(int defaultVolume) {
@@ -179,8 +176,7 @@ int SettingsController::loadVolume(int defaultVolume) {
 
 void SettingsController::saveBrightness(uint8_t brightness) {
     bootBrightness = (int)brightness;
-    Serial.print("[Settings] Saved brightness (in-memory): ");
-    Serial.println(brightness);
+    ESP_LOGI(TAG, "Saved brightness (in-memory): %u", (unsigned)brightness);
 }
 
 uint8_t SettingsController::loadBrightness(uint8_t defaultBrightness) {
@@ -192,8 +188,7 @@ uint8_t SettingsController::loadBrightness(uint8_t defaultBrightness) {
 
 void SettingsController::saveDemoDelay(unsigned long delayMs) {
     bootDemoDelay = delayMs;
-    Serial.print("[Settings] Saved demo delay (in-memory): ");
-    Serial.println(delayMs);
+    ESP_LOGI(TAG, "Saved demo delay (in-memory): %lu", delayMs);
 }
 
 unsigned long SettingsController::loadDemoDelay(unsigned long defaultDelay) {
@@ -205,8 +200,7 @@ unsigned long SettingsController::loadDemoDelay(unsigned long defaultDelay) {
 
 void SettingsController::saveDemoMode(int mode) {
     bootDemoMode = mode;
-    Serial.print("[Settings] Saved demo mode (in-memory): ");
-    Serial.println(mode);
+    ESP_LOGI(TAG, "Saved demo mode (in-memory): %d", mode);
 }
 
 int SettingsController::loadDemoMode(int defaultMode) {
@@ -218,8 +212,7 @@ int SettingsController::loadDemoMode(int defaultMode) {
 
 void SettingsController::saveDemoOrder(int order) {
     bootDemoOrder = order;
-    Serial.print("[Settings] Saved demo order (in-memory): ");
-    Serial.println(order);
+    ESP_LOGI(TAG, "Saved demo order (in-memory): %d", order);
 }
 
 int SettingsController::loadDemoOrder(int defaultOrder) {
@@ -231,8 +224,7 @@ int SettingsController::loadDemoOrder(int defaultOrder) {
 
 void SettingsController::saveBassMonoEnabled(bool enabled) {
     bootBassMonoEnabled = enabled ? 1 : 0;
-    Serial.print("[Settings] Saved bass mono enabled (in-memory): ");
-    Serial.println(enabled ? "true" : "false");
+    ESP_LOGI(TAG, "Saved bass mono enabled (in-memory): %s", enabled ? "true" : "false");
 }
 
 bool SettingsController::loadBassMonoEnabled(bool defaultEnabled) {
@@ -246,8 +238,7 @@ void SettingsController::saveBassMonoCrossover(uint16_t crossoverHz) {
     if (crossoverHz < 20) crossoverHz = 20;
     if (crossoverHz > 500) crossoverHz = 500;
     bootBassMonoCrossover = (int)crossoverHz;
-    Serial.print("[Settings] Saved bass mono crossover (in-memory): ");
-    Serial.println(crossoverHz);
+    ESP_LOGI(TAG, "Saved bass mono crossover (in-memory): %u", (unsigned)crossoverHz);
 }
 
 uint16_t SettingsController::loadBassMonoCrossover(uint16_t defaultHz) {
@@ -277,8 +268,7 @@ int SettingsController::getEffectsByCategory(const char* category, Effect* effec
 
 void SettingsController::saveWiFiSSID(const char* ssid) {
     preferences.putString("wifiSSID", ssid);
-    Serial.print("[Settings] Saved WiFi SSID: ");
-    Serial.println(ssid);
+    ESP_LOGI(TAG, "Saved WiFi SSID: %s", ssid);
 }
 
 bool SettingsController::loadWiFiSSID(char* buffer, size_t bufferSize, const char* defaultSSID) {
@@ -286,8 +276,7 @@ bool SettingsController::loadWiFiSSID(char* buffer, size_t bufferSize, const cha
     if (ssid.length() > 0 && ssid != defaultSSID) {
         strncpy(buffer, ssid.c_str(), bufferSize - 1);
         buffer[bufferSize - 1] = '\0';
-        Serial.print("[Settings] Loaded WiFi SSID: ");
-        Serial.println(buffer);
+        ESP_LOGI(TAG, "Loaded WiFi SSID: %s", buffer);
         return true;
     }
     if (defaultSSID && strlen(defaultSSID) > 0) {
@@ -299,7 +288,7 @@ bool SettingsController::loadWiFiSSID(char* buffer, size_t bufferSize, const cha
 
 void SettingsController::saveWiFiPassword(const char* password) {
     preferences.putString("wifiPass", password);
-    Serial.println("[Settings] Saved WiFi password");
+    ESP_LOGI(TAG, "Saved WiFi password");
 }
 
 bool SettingsController::loadWiFiPassword(char* buffer, size_t bufferSize, const char* defaultPassword) {
@@ -307,7 +296,7 @@ bool SettingsController::loadWiFiPassword(char* buffer, size_t bufferSize, const
     if (password.length() > 0 && password != defaultPassword) {
         strncpy(buffer, password.c_str(), bufferSize - 1);
         buffer[bufferSize - 1] = '\0';
-        Serial.println("[Settings] Loaded WiFi password");
+        ESP_LOGI(TAG, "Loaded WiFi password");
         return true;
     }
     if (defaultPassword && strlen(defaultPassword) > 0) {
@@ -319,7 +308,7 @@ bool SettingsController::loadWiFiPassword(char* buffer, size_t bufferSize, const
 
 void SettingsController::clearAll() {
     preferences.clear();
-    Serial.println("[Settings] All settings cleared");
+    ESP_LOGI(TAG, "All settings cleared");
 }
 
 bool SettingsController::hasSettings() {
@@ -343,6 +332,8 @@ bool SettingsController::loadMQTTConfig(MQTTConfig* config, SemaphoreHandle_t sd
     config->password[0] = '\0';
     config->deviceId[0] = '\0';
     config->baseTopic[0] = '\0';
+    strncpy(config->deviceName, "SFX Controller A", sizeof(config->deviceName) - 1);
+    config->deviceName[sizeof(config->deviceName) - 1] = '\0';
     
     // Try to load from config.json first
     bool configLoaded = loadFromConfigFile(sdMutex);
@@ -384,7 +375,13 @@ bool SettingsController::loadMQTTConfig(MQTTConfig* config, SemaphoreHandle_t sd
         strncpy(config->baseTopic, baseTopic.c_str(), sizeof(config->baseTopic) - 1);
         config->baseTopic[sizeof(config->baseTopic) - 1] = '\0';
     }
-    
+
+    String deviceName = preferences.getString("mqttDevName", "");
+    if (deviceName.length() > 0) {
+        strncpy(config->deviceName, deviceName.c_str(), sizeof(config->deviceName) - 1);
+        config->deviceName[sizeof(config->deviceName) - 1] = '\0';
+    }
+
     return config->enabled && strlen(config->broker) > 0;
 }
 
@@ -404,54 +401,47 @@ void SettingsController::saveMQTTConfig(const MQTTConfig* config) {
     preferences.putString("mqttPassword", config->password);
     preferences.putString("mqttDeviceId", config->deviceId);
     preferences.putString("mqttBaseTopic", config->baseTopic);
-    
-    Serial.println("[Settings] Saved MQTT configuration");
+    preferences.putString("mqttDevName", config->deviceName);
+
+    ESP_LOGI(TAG, "Saved MQTT configuration");
 }
 
 void SettingsController::loadEffectsFromConfig(JsonObject& effectsObj) {
-    Serial.println("[Settings] loadEffectsFromConfig() called");
+    ESP_LOGD(TAG, "loadEffectsFromConfig() called");
     effectCount = 0;
     
     // Iterate through all effects in the JSON object
     for (JsonPair pair : effectsObj) {
-        Serial.print("[Settings] Processing effect pair, current count: ");
-        Serial.println(effectCount);
-        
+        ESP_LOGD(TAG, "Processing effect pair, current count: %d", effectCount);
+
         if (effectCount >= MAX_EFFECTS) {
-            Serial.println("[Settings] Maximum number of effects reached!");
+            ESP_LOGW(TAG, "Maximum number of effects reached!");
             break;
         }
         
         const char* effectName = pair.key().c_str();
-        Serial.print("[Settings] Effect name from key: '");
-        Serial.print(effectName);
-        Serial.println("'");
+        ESP_LOGD(TAG, "Effect name from key: '%s'", effectName);
         
         JsonObject effectData = pair.value().as<JsonObject>();
-        Serial.print("[Settings] Effect data object size: ");
-        Serial.println(effectData.size());
+        ESP_LOGD(TAG, "Effect data object size: %d", effectData.size());
         
         Effect& effect = effects[effectCount];
         strncpy(effect.name, effectName, sizeof(effect.name) - 1);
         effect.name[sizeof(effect.name) - 1] = '\0';
-        Serial.print("[Settings] Stored effect name: '");
-        Serial.print(effect.name);
-        Serial.println("'");
+        ESP_LOGD(TAG, "Stored effect name: '%s'", effect.name);
         
         // Parse loop setting (optional, defaults to false)
         effect.loop = false;
         if (effectData["loop"].is<bool>()) {
             effect.loop = effectData["loop"].as<bool>();
-            Serial.print("[Settings] Loop setting: ");
-            Serial.println(effect.loop ? "enabled" : "disabled");
+            ESP_LOGD(TAG, "Loop setting: %s", effect.loop ? "enabled" : "disabled");
         }
         
         // Parse av_sync setting (optional, defaults to false)
         effect.av_sync = false;
         if (effectData["av_sync"].is<bool>()) {
             effect.av_sync = effectData["av_sync"].as<bool>();
-            Serial.print("[Settings] AV sync setting: ");
-            Serial.println(effect.av_sync ? "enabled" : "disabled");
+            ESP_LOGD(TAG, "AV sync setting: %s", effect.av_sync ? "enabled" : "disabled");
         }
         
         // Parse category setting (optional, defaults to empty)
@@ -460,27 +450,22 @@ void SettingsController::loadEffectsFromConfig(JsonObject& effectsObj) {
             String categoryStr = effectData["category"].as<String>();
             strncpy(effect.category, categoryStr.c_str(), sizeof(effect.category) - 1);
             effect.category[sizeof(effect.category) - 1] = '\0';
-            Serial.print("[Settings] Category: ");
-            Serial.println(effect.category);
+            ESP_LOGD(TAG, "Category: %s", effect.category);
         }
         
         // Parse audio file (optional)
         effect.hasAudio = false;
         if (effectData["audio"].is<String>()) {
             String audioFile = effectData["audio"].as<String>();
-            Serial.print("[Settings] Found audio key, value: '");
-            Serial.print(audioFile);
-            Serial.println("'");
+            ESP_LOGD(TAG, "Found audio key, value: '%s'", audioFile.c_str());
             if (audioFile.length() > 0) {
                 strncpy(effect.audioFile, audioFile.c_str(), sizeof(effect.audioFile) - 1);
                 effect.audioFile[sizeof(effect.audioFile) - 1] = '\0';
                 effect.hasAudio = true;
-                Serial.print("[Settings] Set audio file: '");
-                Serial.print(effect.audioFile);
-                Serial.println("'");
+                ESP_LOGD(TAG, "Set audio file: '%s'", effect.audioFile);
             }
         } else {
-            Serial.println("[Settings] No audio key found for this effect");
+            ESP_LOGD(TAG, "No audio key found for this effect");
         }
         
         // Parse LED effect (optional) - store name as-is
@@ -489,99 +474,73 @@ void SettingsController::loadEffectsFromConfig(JsonObject& effectsObj) {
         if (effectData["led"].is<String>()) {
             String ledEffectName = effectData["led"].as<String>();
             ledEffectName.trim();
-            Serial.print("[Settings] Found led key, value: '");
-            Serial.print(ledEffectName);
-            Serial.println("'");
+            ESP_LOGD(TAG, "Found led key, value: '%s'", ledEffectName.c_str());
             if (ledEffectName.length() > 0) {
                 strncpy(effect.ledEffectName, ledEffectName.c_str(), sizeof(effect.ledEffectName) - 1);
                 effect.ledEffectName[sizeof(effect.ledEffectName) - 1] = '\0';
                 effect.hasLED = true;
-                Serial.print("[Settings] LED effect name: ");
-                Serial.println(effect.ledEffectName);
+                ESP_LOGD(TAG, "LED effect name: %s", effect.ledEffectName);
             }
         } else {
-            Serial.println("[Settings] No led key found for this effect");
+            ESP_LOGD(TAG, "No led key found for this effect");
         }
         
         // Effects are read-only from config.json; not persisted to NVS
         effectCount++;
-        
-        Serial.print("[Settings] Loaded effect #");
-        Serial.print(effectCount);
-        Serial.print(": ");
-        Serial.print(effect.name);
-        if (effect.hasAudio) {
-            Serial.print(" (audio: ");
-            Serial.print(effect.audioFile);
-            Serial.print(")");
-        }
-        if (effect.hasLED) {
-            Serial.print(" (LED: ");
-            Serial.print(effect.ledEffectName);
-            Serial.print(")");
-        }
-        Serial.println();
+
+        ESP_LOGI(TAG, "Loaded effect #%d: %s%s%s%s%s%s%s",
+            effectCount, effect.name,
+            effect.hasAudio ? " (audio: " : "",
+            effect.hasAudio ? effect.audioFile : "",
+            effect.hasAudio ? ")" : "",
+            effect.hasLED ? " (LED: " : "",
+            effect.hasLED ? effect.ledEffectName : "",
+            effect.hasLED ? ")" : "");
     }
     
-    Serial.print("[Settings] loadEffectsFromConfig() complete, total effects: ");
-    Serial.println(effectCount);
+    ESP_LOGI(TAG, "loadEffectsFromConfig() complete, total effects: %d", effectCount);
 }
 
 int SettingsController::getEffectCount() {
-    Serial.print("[Settings] getEffectCount() called, returning: ");
-    Serial.println(effectCount);
+    ESP_LOGD(TAG, "getEffectCount() called, returning: %d", effectCount);
     return effectCount;
 }
 
 bool SettingsController::getEffect(int index, Effect* effect) {
-    Serial.print("[Settings] getEffect(");
-    Serial.print(index);
-    Serial.print(") called, effectCount: ");
-    Serial.println(effectCount);
-    
+    ESP_LOGD(TAG, "getEffect(%d) called, effectCount: %d", index, effectCount);
+
     if (index < 0 || index >= effectCount || effect == nullptr) {
-        Serial.println("[Settings] getEffect() - invalid index or null pointer");
+        ESP_LOGW(TAG, "getEffect() - invalid index or null pointer");
         return false;
     }
     *effect = effects[index];
-    Serial.print("[Settings] getEffect() - returning effect: ");
-    Serial.println(effects[index].name);
+    ESP_LOGD(TAG, "getEffect() - returning effect: %s", effects[index].name);
     return true;
 }
 
 bool SettingsController::getEffectByName(const char* name, Effect* effect) {
-    Serial.print("[Settings] getEffectByName('");
-    Serial.print(name);
-    Serial.print("') called, effectCount: ");
-    Serial.println(effectCount);
-    
+    ESP_LOGD(TAG, "getEffectByName('%s') called, effectCount: %d", name ? name : "(null)", effectCount);
+
     if (name == nullptr || effect == nullptr) {
-        Serial.println("[Settings] getEffectByName() - null pointer");
+        ESP_LOGW(TAG, "getEffectByName() - null pointer");
         return false;
     }
     
     for (int i = 0; i < effectCount; i++) {
-        Serial.print("[Settings] Comparing '");
-        Serial.print(name);
-        Serial.print("' with '");
-        Serial.print(effects[i].name);
-        Serial.print("' -> ");
-        Serial.println(strcmp(effects[i].name, name) == 0 ? "MATCH" : "no match");
+        ESP_LOGD(TAG, "Comparing '%s' with '%s' -> %s", name, effects[i].name,
+            strcmp(effects[i].name, name) == 0 ? "MATCH" : "no match");
         
         if (strcmp(effects[i].name, name) == 0) {
             *effect = effects[i];
-            Serial.print("[Settings] getEffectByName() - found effect: ");
-            Serial.print(effect->name);
-            Serial.print(" (hasAudio: ");
-            Serial.print(effect->hasAudio ? "yes" : "no");
-            Serial.print(", hasLED: ");
-            Serial.print(effect->hasLED ? "yes" : "no");
-            Serial.println(")");
+            ESP_LOGD(TAG, "getEffectByName() - found effect: %s (hasAudio: %s, hasLED: %s)",
+                effect->name,
+                effect->hasAudio ? "yes" : "no",
+                effect->hasLED ? "yes" : "no");
             return true;
         }
     }
     
-    Serial.println("[Settings] getEffectByName() - effect not found");
+    ESP_LOGW(TAG, "getEffectByName() - effect not found");
     return false;
 }
 

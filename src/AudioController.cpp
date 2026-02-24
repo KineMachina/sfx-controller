@@ -1,6 +1,9 @@
 #include "AudioController.h"
 #include "SD.h"
 #include "SPI.h"
+#include "RuntimeLog.h"
+
+static const char* TAG = "Audio";
 
 AudioController::AudioController(Audio* audioObj, 
                                 int bck, int lrc, int dout,
@@ -18,8 +21,8 @@ AudioController::AudioController(Audio* audioObj,
 }
 
 bool AudioController::initSDCard() {
-    Serial.println("Initializing SD card...");
-    
+    ESP_LOGI(TAG, "Initializing SD card...");
+
     // Give SD card time to stabilize power
     delay(200);
     
@@ -42,11 +45,7 @@ bool AudioController::initSDCard() {
     const int retryDelay = 300;
     
     for (int attempt = 1; attempt <= maxRetries; attempt++) {
-        Serial.print("Mount attempt ");
-        Serial.print(attempt);
-        Serial.print("/");
-        Serial.print(maxRetries);
-        Serial.print("... ");
+        ESP_LOGI(TAG, "Mount attempt %d/%d...", attempt, maxRetries);
         
         if (SD.begin(sdCsPin)) {
             // Verify mount by trying to open root directory
@@ -60,30 +59,27 @@ bool AudioController::initSDCard() {
             }
             
             if (mountVerified) {
-                Serial.println("SUCCESS!");
-                Serial.println("SD card initialized successfully.");
+                ESP_LOGI(TAG, "SD card initialized successfully.");
                 
                 // Create mutex to protect SD card SPI access
                 sdCardMutex = xSemaphoreCreateMutex();
                 if (sdCardMutex == NULL) {
-                    Serial.println("ERROR: Failed to create SD card mutex!");
+                    ESP_LOGE(TAG, "Failed to create SD card mutex!");
                     return false;
                 }
                 
                 return true;
             } else {
-                Serial.println("FAILED (mount succeeded but root not accessible)");
+                ESP_LOGW(TAG, "Mount succeeded but root not accessible");
                 SD.end();
                 delay(100);
             }
         } else {
-            Serial.println("FAILED");
+            ESP_LOGW(TAG, "Mount attempt failed");
         }
         
         if (attempt < maxRetries) {
-            Serial.print("Waiting ");
-            Serial.print(retryDelay);
-            Serial.println("ms before retry...");
+            ESP_LOGI(TAG, "Waiting %dms before retry...", retryDelay);
             
             SD.end();
             delay(100);
@@ -100,17 +96,17 @@ bool AudioController::initSDCard() {
         }
     }
     
-    Serial.println("\nERROR: SD Card Mount Failed after all retries!");
+    ESP_LOGE(TAG, "SD Card Mount Failed after all retries!");
     return false;
 }
 
 void AudioController::initI2S() {
-    Serial.println("Initializing I2S for PCM5122...");
-    
+    ESP_LOGI(TAG, "Initializing I2S for PCM5122...");
+
     audio->setPinout(i2sBckPin, i2sLrcPin, i2sDoutPin);
     audio->setVolume(21);
-    
-    Serial.println("I2S initialized.");
+
+    ESP_LOGI(TAG, "I2S initialized.");
 }
 
 void AudioController::audioTaskWrapper(void* parameter) {
@@ -119,7 +115,7 @@ void AudioController::audioTaskWrapper(void* parameter) {
 }
 
 void AudioController::audioTask() {
-    Serial.println("[Audio] Audio task started on Core 0");
+    ESP_LOGI(TAG, "Audio task started on Core 0");
     
     AudioCommand cmd;
     AudioStatus status;
@@ -169,11 +165,9 @@ void AudioController::audioTask() {
                                 // Start playback
                                 audio->connecttoFS(SD, filename.c_str());
                                 currentFile = filename;
-                                Serial.print("[Audio] Playing: ");
-                                Serial.println(filename);
+                                ESP_LOGI(TAG, "Playing: %s", filename.c_str());
                             } else {
-                                Serial.print("[Audio] File not found: ");
-                                Serial.println(filename);
+                                ESP_LOGW(TAG, "File not found: %s", filename.c_str());
                             }
                             
                             xSemaphoreGive(sdCardMutex);
@@ -185,7 +179,7 @@ void AudioController::audioTask() {
                 case AudioCommand::CMD_STOP: {
                     // Handle stop command
                     audio->stopSong();
-                    Serial.println("[Audio] Playback stopped");
+                    ESP_LOGI(TAG, "Playback stopped");
                     break;
                 }
                 
@@ -194,8 +188,7 @@ void AudioController::audioTask() {
                     if (cmd.volume >= 0 && cmd.volume <= 21) {
                         currentVolume = cmd.volume;
                         audio->setVolume(cmd.volume);
-                        Serial.print("[Audio] Volume set to: ");
-                        Serial.println(cmd.volume);
+                        ESP_LOGI(TAG, "Volume set to: %d", cmd.volume);
                     }
                     break;
                 }
@@ -257,11 +250,11 @@ bool AudioController::begin() {
     audioStatusQueue = xQueueCreate(5, sizeof(AudioStatus));
     
     if (audioCommandQueue == NULL || audioStatusQueue == NULL) {
-        Serial.println("[Audio] ERROR: Failed to create queues!");
+        ESP_LOGE(TAG, "Failed to create queues!");
         return false;
     }
-    
-    Serial.println("[Audio] Queues created successfully");
+
+    ESP_LOGI(TAG, "Queues created successfully");
     
     // Start the Audio Task on Core 0
     xTaskCreatePinnedToCore(
@@ -282,10 +275,10 @@ bool AudioController::begin() {
 
 bool AudioController::playFile(const String& filename) {
     if (audioCommandQueue == NULL) {
-        Serial.println("[Audio] ERROR: Command queue not initialized");
+        ESP_LOGE(TAG, "Command queue not initialized");
         return false;
     }
-    
+
     String newFile = filename;
     newFile.trim();
     
@@ -309,24 +302,24 @@ bool AudioController::playFile(const String& filename) {
         currentFile = newFile;  // Update local copy for status queries
         return true;
     } else {
-        Serial.println("[Audio] ERROR: Failed to send play command (queue full)");
+        ESP_LOGE(TAG, "Failed to send play command (queue full)");
         return false;
     }
 }
 
 void AudioController::stop() {
     if (audioCommandQueue == NULL) {
-        Serial.println("[Audio] ERROR: Command queue not initialized");
+        ESP_LOGE(TAG, "Command queue not initialized");
         return;
     }
-    
+
     // Create stop command
     AudioCommand cmd;
     cmd.type = AudioCommand::CMD_STOP;
     
     // Send command to queue (non-blocking)
     if (xQueueSend(audioCommandQueue, &cmd, pdMS_TO_TICKS(100)) != pdTRUE) {
-        Serial.println("[Audio] WARNING: Failed to send stop command (queue full)");
+        ESP_LOGW(TAG, "Failed to send stop command (queue full)");
         // Fallback: try direct stop
         audio->stopSong();
     }
@@ -338,10 +331,10 @@ void AudioController::setVolume(int volume) {
     }
     
     if (audioCommandQueue == NULL) {
-        Serial.println("[Audio] ERROR: Command queue not initialized");
+        ESP_LOGE(TAG, "Command queue not initialized");
         return;
     }
-    
+
     // Create volume command
     AudioCommand cmd;
     cmd.type = AudioCommand::CMD_SET_VOLUME;
@@ -349,7 +342,7 @@ void AudioController::setVolume(int volume) {
     
     // Send command to queue (non-blocking)
     if (xQueueSend(audioCommandQueue, &cmd, pdMS_TO_TICKS(100)) != pdTRUE) {
-        Serial.println("[Audio] WARNING: Failed to send volume command (queue full)");
+        ESP_LOGW(TAG, "Failed to send volume command (queue full)");
         // Fallback: set directly
         currentVolume = volume;
         audio->setVolume(volume);

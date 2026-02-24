@@ -2,6 +2,9 @@
 #include "MatrixMath.h"
 #include "LEDMath.h"
 #include <math.h>
+#include "RuntimeLog.h"
+
+static const char* TAG = "LEDMatrix";
 
 MatrixLEDController::MatrixLEDController(int pin, int gridWidth, int gridHeight)
     : pin(pin), gridWidth(gridWidth), gridHeight(gridHeight),
@@ -23,7 +26,7 @@ MatrixLEDController::MatrixLEDController(int pin, int gridWidth, int gridHeight)
         NEO_MATRIX_TOP + NEO_MATRIX_LEFT + NEO_MATRIX_ROWS + NEO_MATRIX_ZIGZAG,
         NEO_GRB + NEO_KHZ800
     );
-    Serial.println("[MatrixLED] NeoMatrix initialized for grid mode");
+    ESP_LOGI(TAG, "NeoMatrix initialized for grid mode");
 }
 
 MatrixLEDController::~MatrixLEDController() {
@@ -33,8 +36,8 @@ MatrixLEDController::~MatrixLEDController() {
 }
 
 bool MatrixLEDController::begin() {
-    Serial.println("Initializing NeoPixel LED matrix...");
-    
+    ESP_LOGI(TAG, "Initializing NeoPixel LED matrix...");
+
     matrix->begin();
     matrix->setBrightness(currentBrightness);
     matrix->fillScreen(0);
@@ -45,11 +48,11 @@ bool MatrixLEDController::begin() {
     ledStatusQueue = xQueueCreate(5, sizeof(LEDStatus));
     
     if (ledCommandQueue == NULL || ledStatusQueue == NULL) {
-        Serial.println("[MatrixLED] ERROR: Failed to create queues!");
+        ESP_LOGE(TAG, "Failed to create queues!");
         return false;
     }
-    
-    Serial.println("[MatrixLED] Queues created successfully");
+
+    ESP_LOGI(TAG, "Queues created successfully");
     
     // Start the LED task on Core 1
     xTaskCreatePinnedToCore(
@@ -62,11 +65,7 @@ bool MatrixLEDController::begin() {
         1   // Core 1
     );
     
-    Serial.print("NeoMatrix initialized: ");
-    Serial.print(gridWidth);
-    Serial.print("x");
-    Serial.print(gridHeight);
-    Serial.println(" grid");
+    ESP_LOGI(TAG, "NeoMatrix initialized: %dx%d grid", gridWidth, gridHeight);
     
     return true;
 }
@@ -77,7 +76,7 @@ void MatrixLEDController::ledTaskWrapper(void* parameter) {
 }
 
 void MatrixLEDController::ledTask() {
-    Serial.println("[MatrixLED] LED task started on Core 1");
+    ESP_LOGI(TAG, "LED task started on Core 1");
     
     LEDCommand cmd;
     LEDStatus status;
@@ -102,14 +101,7 @@ void MatrixLEDController::ledTask() {
                         effectStartCallback(cmd.effect, effectStartCallbackData);
                     }
                     
-                    Serial.print("[MatrixLED] Effect started: ");
-                    Serial.print(cmd.effect);
-                    Serial.print(", brightness: ");
-                    Serial.print(currentBrightness);
-                    Serial.print(", grid: ");
-                    Serial.print(gridWidth);
-                    Serial.print("x");
-                    Serial.println(gridHeight);
+                    ESP_LOGI(TAG, "Effect started: %d, brightness: %u, grid: %dx%d", cmd.effect, currentBrightness, gridWidth, gridHeight);
                     break;
                 }
                 
@@ -123,7 +115,7 @@ void MatrixLEDController::ledTask() {
                     setAllPixels(0);
                     showPixels();
                     
-                    Serial.println("[MatrixLED] Effect stopped - all LEDs off");
+                    ESP_LOGI(TAG, "Effect stopped - all LEDs off");
                     break;
                 }
                 
@@ -131,8 +123,7 @@ void MatrixLEDController::ledTask() {
                     // Handle brightness command
                     currentBrightness = cmd.brightness;
                     setPixelBrightness(cmd.brightness);
-                    Serial.print("[MatrixLED] Brightness set to: ");
-                    Serial.println(cmd.brightness);
+                    ESP_LOGI(TAG, "Brightness set to: %u", cmd.brightness);
                     break;
                 }
             }
@@ -169,18 +160,18 @@ void MatrixLEDController::ledTask() {
 
 void MatrixLEDController::startEffect(EffectType effect) {
     if (ledCommandQueue == NULL) {
-        Serial.println("[MatrixLED] ERROR: Command queue not initialized");
+        ESP_LOGE(TAG, "Command queue not initialized");
         return;
     }
-    
+
     // Create command
     LEDCommand cmd;
     cmd.type = LEDCommand::CMD_START_EFFECT;
     cmd.effect = effect;
-    
+
     // Send command to queue (non-blocking with timeout)
     if (xQueueSend(ledCommandQueue, &cmd, pdMS_TO_TICKS(100)) != pdTRUE) {
-        Serial.println("[MatrixLED] WARNING: Failed to send start effect command (queue full)");
+        ESP_LOGW(TAG, "Failed to send start effect command (queue full)");
         // Fallback: set directly (for backward compatibility)
         currentEffect = effect;
         effectRunning = true;
@@ -199,17 +190,17 @@ void MatrixLEDController::setEffectStartCallback(EffectStartCallback callback, v
 
 void MatrixLEDController::stopEffect() {
     if (ledCommandQueue == NULL) {
-        Serial.println("[MatrixLED] ERROR: Command queue not initialized");
+        ESP_LOGE(TAG, "Command queue not initialized");
         return;
     }
-    
+
     // Create stop command
     LEDCommand cmd;
     cmd.type = LEDCommand::CMD_STOP_EFFECT;
-    
+
     // Send command to queue (non-blocking)
     if (xQueueSend(ledCommandQueue, &cmd, pdMS_TO_TICKS(100)) != pdTRUE) {
-        Serial.println("[MatrixLED] WARNING: Failed to send stop effect command (queue full)");
+        ESP_LOGW(TAG, "Failed to send stop effect command (queue full)");
         // Fallback: stop directly and turn off LEDs
         effectRunning = false;
         currentEffect = EFFECT_NONE;
