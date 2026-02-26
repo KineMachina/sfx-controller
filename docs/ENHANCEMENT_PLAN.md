@@ -8,7 +8,7 @@
 
 ## Executive Summary
 
-**Overall Status**: 11 of 57 items complete (~19%), 2 partially done
+**Overall Status**: 11 of 58 items complete (~19%), 2 partially done
 
 | Status | Count |
 |--------|-------|
@@ -293,11 +293,89 @@ As needed per phases above
 - #19 (FreeRTOS) → improves all features' performance
 - Display Phase 1 → Phase 2 → ... → Phase 5
 
+## Hardware / Signal Integrity
+
+### 58. LED Matrix Sparkle / Random Pixel Noise
+- **Status**: Open — investigation + hardware fix needed
+- **Symptom**: Random pixels flash incorrect colors ("sparkle") on the 16×16 WS2812B matrix. More pronounced on USB power alone; improves with dedicated 5V power injection, but does not fully disappear.
+- **Priority**: High — visible artifact that degrades every matrix effect
+
+#### Root Cause Analysis
+
+**Most likely cause: 3.3V logic level vs. WS2812B threshold (primary suspect)**
+
+The ESP32-S3 GPIO6 outputs 3.3V logic. The WS2812B datasheet specifies data-high threshold as 0.7 × VDD. At VDD = 5.0V that's 3.5V — so 3.3V is **below spec**. It often "mostly works" because real-world thresholds have margin, but any VDD sag (from current draw or insufficient power injection) raises the effective threshold while the data voltage stays at 3.3V, causing bit errors that manifest as sparkle.
+
+This explains the observed behavior exactly:
+- **USB-only power**: VDD sags under load → threshold rises → more sparkle
+- **Dedicated 5V rail**: VDD is stable → threshold stays near the margin → less sparkle but some remains (3.3V is still technically out of spec)
+
+**Contributing factors:**
+
+| Factor | Impact | Notes |
+|--------|--------|-------|
+| **No level shifter** | HIGH | 3.3V → 5V shift would put data well above threshold |
+| **Voltage drop across 256 pixels** | MEDIUM | Pixels far from power injection see lower VDD, but also lower threshold — mixed effect |
+| **470Ω series resistor** | LOW | BOM includes R5 (470Ω) per Adafruit recommendation — correct for impedance matching but reduces signal amplitude slightly |
+| **Data line length** | LOW-MEDIUM | Long wire between GPIO6 and first pixel adds capacitance, slows edge transitions |
+| **WiFi/audio CPU contention** | LOW | NeoPixel library disables interrupts during data send, but ESP32 RMT peripheral (used by Adafruit NeoPixel on ESP32) handles timing in hardware — unlikely cause |
+| **Ground path** | LOW | If ESP32 and LED matrix don't share a solid ground reference, noise on the ground can shift the data signal relative to the LED's reference |
+
+#### Recommended Fixes (in priority order)
+
+**1. Add a 3.3V → 5V level shifter on the data line (most likely fix)**
+- Use a 74AHCT125 or SN74HCT125 buffer — single gate, powered from 5V rail
+- These accept 3.3V input as logic high (TTL thresholds: VIH = 2.0V) and output clean 5V
+- Place between ESP32 GPIO6 and the 470Ω resistor
+- Cost: ~$0.50, single component, minimal PCB change
+- This is the standard solution recommended by Adafruit for NeoPixels with 3.3V MCUs
+
+**2. Add power injection at matrix midpoint**
+- Current: power injected at one edge of the 16×16 panel
+- Add a second 5V+GND injection point at the opposite edge or center
+- Reduces max voltage drop across the panel from ~0.5V to ~0.25V
+- Helps even with level shifter since WS2812B regenerates the data signal at each pixel — cleaner VDD means cleaner regeneration
+
+**3. Add bulk capacitor at matrix power input**
+- 1000µF electrolytic across 5V and GND at the point where power enters the matrix
+- Absorbs current spikes when many pixels change simultaneously
+- BOM already specifies this but verify it's actually installed
+
+**4. Verify/shorten data line**
+- Keep the wire from GPIO6 (or level shifter output) to the first pixel as short as possible
+- Use shielded wire or twisted pair (data + ground) if the run exceeds ~15cm
+- Ensure ground wire runs alongside or twisted with data wire
+
+**5. Verify common ground**
+- ESP32 GND and LED matrix GND must be connected solidly
+- If using separate power supplies, the grounds MUST be tied together
+
+#### Testing Plan
+
+1. Add level shifter → test with USB power only → sparkle should be eliminated or dramatically reduced
+2. If residual sparkle remains, add second power injection point
+3. Test at full white (all 256 pixels) to stress the power path
+4. Test during WiFi activity + audio playback to verify no CPU-related glitches
+
+#### BOM Impact
+
+| Component | Qty | Part | Notes |
+|-----------|-----|------|-------|
+| U7 | 1 | 74AHCT125 | Level shifter, only 1 of 4 gates used |
+| C13 | 1 | 100nF | Decoupling cap for U7, close to VCC pin |
+| C14 | 1 | 1000µF | Bulk cap at matrix power input (may already exist) |
+
+#### Software Changes
+
+None required — this is a hardware-only fix. No code changes needed.
+
+---
+
 ## Feature Groupings
 
 - **Battle Arena**: #14 (done), #29, #30, #31, #32
 - **Audio**: #3, #4, #5, #24, #56 (done), #57 (done)
-- **LED Effects**: #7, #8, #9, #10, #35
+- **LED Effects**: #7, #8, #9, #10, #35, #58 (hardware)
 - **Demo Mode**: #11, #12, #13
 - **Network**: #15, #16
 - **UI**: #17, #18
@@ -317,6 +395,7 @@ As needed per phases above
 
 ## Recent Updates (2026-02-25)
 
+- **LED Matrix Sparkle Investigation (#58)**: Root cause analysis — 3.3V logic level below WS2812B spec threshold (0.7 × VDD = 3.5V). Primary fix: add 74AHCT125 level shifter. Secondary: add 2nd power injection point at matrix midpoint. Hardware-only fix, no code changes needed.
 - **PCM5122 I2C Anti-Pop (#57)**: Implemented — `Pcm5122.h/.cpp` I2C driver mutes DAC during playback transitions via register 0x03. Integrated into AudioController CMD_PLAY/CMD_STOP handlers. I2C pins GPIO8 (SDA), GPIO9 (SCL). Graceful degradation if DAC not found.
 
 ## Previous Updates (2026-02-09)
