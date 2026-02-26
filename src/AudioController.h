@@ -8,6 +8,7 @@
 #include <FreeRTOS.h>
 #include <task.h>
 #include <queue.h>
+#include "Pcm5122.h"
 
 /**
  * AudioController - Manages audio playback from SD card to PCM5122 DAC
@@ -20,7 +21,12 @@ private:
     int i2sBckPin;
     int i2sLrcPin;
     int i2sDoutPin;
-    
+
+    // I2C DAC control
+    Pcm5122 dac;
+    int i2cSdaPin;
+    int i2cSclPin;
+
     // SD card configuration
     int sdCsPin;
     int spiMosiPin;
@@ -63,6 +69,7 @@ private:
     // Internal methods
     bool initSDCard();
     void initI2S();
+    void initDac();
     static void audioTaskWrapper(void* parameter);
     void audioTask();
     
@@ -78,9 +85,10 @@ public:
      * @param miso SPI MISO pin
      * @param sck SPI clock pin
      */
-    AudioController(Audio* audioObj, 
+    AudioController(Audio* audioObj,
                     int bck, int lrc, int dout,
-                    int cs, int mosi, int miso, int sck);
+                    int cs, int mosi, int miso, int sck,
+                    int i2cSda = -1, int i2cScl = -1);
     
     /**
      * Initialize audio system (SD card, I2S, start task)

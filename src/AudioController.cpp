@@ -5,11 +5,13 @@
 
 static const char* TAG = "Audio";
 
-AudioController::AudioController(Audio* audioObj, 
+AudioController::AudioController(Audio* audioObj,
                                 int bck, int lrc, int dout,
-                                int cs, int mosi, int miso, int sck)
+                                int cs, int mosi, int miso, int sck,
+                                int i2cSda, int i2cScl)
     : audio(audioObj),
       i2sBckPin(bck), i2sLrcPin(lrc), i2sDoutPin(dout),
+      i2cSdaPin(i2cSda), i2cSclPin(i2cScl),
       sdCsPin(cs), spiMosiPin(mosi), spiMisoPin(miso), spiSckPin(sck),
       currentFile("/sounds/roar.mp3"),
       fileChanged(false), isSwitchingFile(false),
@@ -109,6 +111,17 @@ void AudioController::initI2S() {
     ESP_LOGI(TAG, "I2S initialized.");
 }
 
+void AudioController::initDac() {
+    if (i2cSdaPin < 0 || i2cSclPin < 0) {
+        ESP_LOGI(TAG, "I2C pins not configured, skipping DAC init");
+        return;
+    }
+
+    if (!dac.begin(i2cSdaPin, i2cSclPin)) {
+        ESP_LOGW(TAG, "PCM5122 DAC not found — audio will work without anti-pop");
+    }
+}
+
 void AudioController::audioTaskWrapper(void* parameter) {
     AudioController* controller = static_cast<AudioController*>(parameter);
     controller->audioTask();
@@ -147,10 +160,13 @@ void AudioController::audioTask() {
                             fileExists = SD.exists(filename);
                             
                             if (fileExists) {
+                                // Mute DAC before stopping to prevent pop
+                                dac.mute();
+
                                 // Stop current playback (if any) and ensure cleanup
                                 if (audio->isRunning()) {
                                     audio->stopSong();
-                                    
+
                                     // Wait for audio to fully stop
                                     int timeout = 0;
                                     while (audio->isRunning() && timeout < 50) {
@@ -158,14 +174,18 @@ void AudioController::audioTask() {
                                         vTaskDelay(pdMS_TO_TICKS(10));
                                         timeout++;
                                     }
-                                    
+
                                     vTaskDelay(pdMS_TO_TICKS(50));
                                 }
-                                
+
                                 // Start playback
                                 audio->connecttoFS(SD, filename.c_str());
                                 currentFile = filename;
                                 ESP_LOGI(TAG, "Playing: %s", filename.c_str());
+
+                                // Let I2S clocks stabilize, then unmute
+                                vTaskDelay(pdMS_TO_TICKS(20));
+                                dac.unmute();
                             } else {
                                 ESP_LOGW(TAG, "File not found: %s", filename.c_str());
                             }
@@ -177,7 +197,9 @@ void AudioController::audioTask() {
                 }
                 
                 case AudioCommand::CMD_STOP: {
-                    // Handle stop command
+                    // Mute DAC before stopping to prevent pop
+                    dac.mute();
+                    vTaskDelay(pdMS_TO_TICKS(20));
                     audio->stopSong();
                     ESP_LOGI(TAG, "Playback stopped");
                     break;
@@ -244,7 +266,8 @@ bool AudioController::begin() {
     }
     
     initI2S();
-    
+    initDac();
+
     // Create queues for inter-task communication
     audioCommandQueue = xQueueCreate(10, sizeof(AudioCommand));
     audioStatusQueue = xQueueCreate(5, sizeof(AudioStatus));

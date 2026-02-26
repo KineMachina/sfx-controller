@@ -20,6 +20,10 @@ static const char* TAG = "Main";
 #define I2S_LRC      15
 #define I2S_DOUT     16
 
+// I2C Pins (PCM5122 DAC control)
+#define I2C_SDA      8
+#define I2C_SCL      9
+
 // SD SPI Pins
 #define SD_CS        10
 #define SPI_MOSI     11
@@ -44,7 +48,8 @@ char wifiPassword[64] = "";
 // Controller instances
 Audio audio;
 AudioController audioController(&audio, I2S_BCK, I2S_LRC, I2S_DOUT,
-                                SD_CS, SPI_MOSI, SPI_MISO, SPI_SCK);
+                                SD_CS, SPI_MOSI, SPI_MISO, SPI_SCK,
+                                I2C_SDA, I2C_SCL);
 
 StripLEDController ledStripController(LED_STRIP_PIN, LED_COUNT);
 MatrixLEDController ledMatrixController(LED_MATRIX_PIN, MATRIX_WIDTH, MATRIX_HEIGHT);
