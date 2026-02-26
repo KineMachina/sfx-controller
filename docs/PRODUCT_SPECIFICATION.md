@@ -91,7 +91,8 @@ A compact, WiFi-enabled controller that plays audio files from an SD card while 
 ### Core Features
 
 #### Audio System
-- ✅ **High-Quality DAC:** PCM5122 32-bit, 384kHz I2S DAC
+- ✅ **High-Quality DAC:** PCM5122 32-bit, 384kHz I2S DAC with I2C anti-pop control
+- ✅ **Pop-Free Transitions:** I2C DAC mute/unmute eliminates clicks during track changes
 - ✅ **Format Support:** MP3, WAV, AAC, M4A, FLAC, OGG
 - ✅ **Volume Control:** 0-21 step digital volume control
 - ✅ **SD Card Storage:** FAT32 formatted, 8GB+ support

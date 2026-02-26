@@ -104,6 +104,8 @@
 | SPI MOSI | GPIO11 | Master Out Slave In |
 | SPI MISO | GPIO13 | Master In Slave Out |
 | SPI SCK | GPIO12 | Serial Clock |
+| I2C SDA | GPIO8 | PCM5122 SDA (anti-pop mute) |
+| I2C SCL | GPIO9 | PCM5122 SCL (anti-pop mute) |
 | NeoPixel Data | GPIO5 | WS2812B Data |
 | UART TX | GPIO43 | Serial output (USB-CDC) |
 | UART RX | GPIO44 | Serial input (USB-CDC) |
@@ -115,8 +117,8 @@
 | BCLK | Pin 5 | GPIO7 (I2S BCK) |
 | LRCK | Pin 6 | GPIO15 (I2S LRC) |
 | DIN | Pin 7 | GPIO16 (I2S DOUT) |
-| SCL | Pin 16 | Optional (I2C) |
-| SDA | Pin 17 | Optional (I2C) |
+| SCL | Pin 16 | GPIO9 (I2C SCL) |
+| SDA | Pin 17 | GPIO8 (I2C SDA) |
 | VDD | Pin 1 | 3.3V |
 | AGND | Pin 2 | Ground |
 | VOUTL | Pin 20 | Left Audio Out |

@@ -8,11 +8,11 @@
 
 ## Executive Summary
 
-**Overall Status**: 10 of 56 items complete (~18%), 2 partially done
+**Overall Status**: 11 of 57 items complete (~19%), 2 partially done
 
 | Status | Count |
 |--------|-------|
-| Completed | 10 |
+| Completed | 11 |
 | Partially Implemented | 2 |
 | In Progress | 1 (FreeRTOS Optimization) |
 | Pending | 43 |
@@ -129,6 +129,13 @@ These are small (2–5 hours each), high-value, and have no dependencies:
 - **Implementation**:
   - Gradual volume changes during transitions
   - Configurable fade time (100ms-2000ms)
+- **Note**: Pop/click elimination is already implemented via I2C DAC mute (see #57). This item is for audible crossfade effects.
+
+### 57. PCM5122 I2C Anti-Pop Control
+- **Status**: Implemented
+- **Description**: I2C control of the PCM5122 DAC to mute during playback transitions, eliminating audible pops/clicks caused by abrupt I2S start/stop. Uses the DAC's built-in soft volume ramp via register 0x03. Gracefully degrades if DAC is not found on I2C bus.
+- **Files**: `Pcm5122.h/.cpp`, integrated into `AudioController`
+- **I2C Pins**: GPIO8 (SDA), GPIO9 (SCL), address 0x4C
 
 ### 5. Audio Metadata Display
 - **Description**: Show track name, duration, file size in web UI
@@ -289,7 +296,7 @@ As needed per phases above
 ## Feature Groupings
 
 - **Battle Arena**: #14 (done), #29, #30, #31, #32
-- **Audio**: #3, #4, #5, #24, #56 (done)
+- **Audio**: #3, #4, #5, #24, #56 (done), #57 (done)
 - **LED Effects**: #7, #8, #9, #10, #35
 - **Demo Mode**: #11, #12, #13
 - **Network**: #15, #16
@@ -308,7 +315,11 @@ As needed per phases above
 - Document new features in code and web UI
 - **Display Notes**: ST7789 2" screen (240x320) requires SPI communication — shared SPI bus with SD card (different CS pins), consider refresh rate vs performance, memory for graphics buffers, power consumption
 
-## Recent Updates (2026-02-09)
+## Recent Updates (2026-02-25)
+
+- **PCM5122 I2C Anti-Pop (#57)**: Implemented — `Pcm5122.h/.cpp` I2C driver mutes DAC during playback transitions via register 0x03. Integrated into AudioController CMD_PLAY/CMD_STOP handlers. I2C pins GPIO8 (SDA), GPIO9 (SCL). Graceful degradation if DAC not found.
+
+## Previous Updates (2026-02-09)
 
 - **Bass Mono DSP (#56)**: Implemented — `BassMonoProcessor.h/.cpp` with 2nd-order Butterworth biquad, `audio_process_extern()` callback, config.json support, HTTP API, MQTT command, 19 native unit tests.
 - **MQTT Support (#14)**: Fully implemented — `MQTTController.h/.cpp` with AsyncMqttClient, FreeRTOS task, exponential backoff, LWT, mDNS, web UI config. Moved from pending to completed.

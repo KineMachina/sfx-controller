@@ -4,7 +4,7 @@ A feature-rich audio playback and LED effects controller for ESP32-S3, designed 
 
 ## Features
 
-- **Audio Playback**: Play audio files from SD card with volume control
+- **Audio Playback**: Play audio files from SD card with volume control and pop-free transitions
 - **LED Effects**: 49 LED effects total - 23 strip effects and 28 matrix effects
 - **Dual LED Outputs**: Independent control of LED strips (GPIO 6) and LED matrix panels (GPIO 5)
 - **16x16 Panel Support**: Dedicated matrix controller for WS2812B LED panels with 2D coordinate system
@@ -35,6 +35,10 @@ A feature-rich audio playback and LED effects controller for ESP32-S3, designed 
 - BCK: Pin 7
 - LRC: Pin 15
 - DOUT: Pin 16
+
+**I2C DAC Control (PCM5122):**
+- SDA: Pin 8
+- SCL: Pin 9
 
 **SD Card (SPI):**
 - CS: Pin 10
@@ -476,6 +480,7 @@ kinemachina-sfx-controller/
 │   ├── MatrixLEDController.* # LED matrix effects (GPIO 5)
 │   ├── HTTPServerController.* # Web server and HTTP API
 │   ├── MQTTController.*      # MQTT client and event-driven control
+│   ├── Pcm5122.*             # PCM5122 I2C DAC control (anti-pop mute)
 │   ├── SettingsController.*  # Settings persistence
 │   └── DemoController.*      # Demo mode
 ├── config.json.example       # Configuration template

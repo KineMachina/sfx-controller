@@ -71,6 +71,8 @@ Effects are defined in config.json and can combine an audio file, LED effect nam
 | I2S BCK | 7 |
 | I2S LRC | 15 |
 | I2S DOUT | 16 |
+| I2C SDA | 8 |
+| I2C SCL | 9 |
 | SD CS | 10 |
 | SPI MOSI | 11 |
 | SPI SCK | 12 |
@@ -91,7 +93,8 @@ Effects are defined in config.json and can combine an audio file, LED effect nam
 All source in `src/`. Each controller is a `.h`/`.cpp` pair:
 
 - **main.cpp** — entry point, pin defines, controller instantiation, `setup()`/`loop()`
-- **AudioController** — I2S playback, SD card init, volume control, SD mutex owner
+- **AudioController** — I2S playback, SD card init, volume control, SD mutex owner, PCM5122 DAC mute/unmute
+- **Pcm5122** — I2C driver for PCM5122 DAC anti-pop control (mute during playback transitions)
 - **HTTPServerController** — WiFi management, 40+ REST API endpoints, web UI, effect loop tracking (largest file ~2700 LOC)
 - **MatrixLEDController** — 31 effects for 16x16 grid (2nd largest ~2200 LOC)
 - **StripLEDController** — 23 effects for linear LED arrays
@@ -148,6 +151,7 @@ ESP_LOGD(TAG, "Heap: %u bytes", freeHeap);          // Periodic/verbose
 | MatrixLEDController.cpp | `"LEDMatrix"` |
 | SettingsController.cpp | `"Settings"` |
 | DemoController.cpp | `"Demo"` |
+| Pcm5122.cpp | `"PCM5122"` |
 
 ## Serial Commands
 
