@@ -334,6 +334,15 @@ HTTPServerController::HTTPServerController(char* ssid, char* password, int port)
       currentLoopingEffect(""), isLoopingAudio(false), isLoopingLED(false), loopingAudioFile(""), loopingAvSync(false), audioPlaybackFailed(false), audioLoopStartTime(0) {
     instance = this;
     loopingLEDEffectName[0] = '\0';
+    strncpy(deviceId, "sfx-001", sizeof(deviceId) - 1);
+    deviceId[sizeof(deviceId) - 1] = '\0';
+}
+
+void HTTPServerController::setDeviceId(const char* id) {
+    if (id && strlen(id) > 0) {
+        strncpy(deviceId, id, sizeof(deviceId) - 1);
+        deviceId[sizeof(deviceId) - 1] = '\0';
+    }
 }
 
 HTTPServerController::~HTTPServerController() {
@@ -355,11 +364,11 @@ bool HTTPServerController::initWiFi() {
     WiFi.persistent(true);
     WiFi.setAutoReconnect(true);
     
-    // Set hostname for easier identification
-    WiFi.setHostname("esp32-audio");
-    
+    // Set hostname to device ID for network identification
+    WiFi.setHostname(deviceId);
+
     WiFi.begin(wifiSSID, wifiPassword);
-    
+
     // Wait for connection with timeout
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 30) {
@@ -367,20 +376,20 @@ bool HTTPServerController::initWiFi() {
         ESP_LOGI(TAG, ".");
         attempts++;
     }
-    
+
     if (WiFi.status() == WL_CONNECTED) {
         ESP_LOGI(TAG, "WiFi connected!");
         ESP_LOGI(TAG, "IP address: %s", WiFi.localIP().toString().c_str());
         ESP_LOGI(TAG, "Signal strength (RSSI): %d dBm", WiFi.RSSI());
 
         // Initialize mDNS for .local hostname resolution
-        if (!MDNS.begin("esp32-audio")) {
+        if (!MDNS.begin(deviceId)) {
             ESP_LOGE(TAG, "Error setting up mDNS responder!");
         } else {
             ESP_LOGI(TAG, "mDNS responder started");
-            ESP_LOGI(TAG, "Hostname: esp32-audio.local");
+            ESP_LOGI(TAG, "Hostname: %s.local", deviceId);
         }
-        
+
         return true;
     } else {
         ESP_LOGE(TAG, "WiFi connection failed!");

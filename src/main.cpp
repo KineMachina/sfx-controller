@@ -12,6 +12,7 @@
 #include "BassMonoProcessor.h"
 #include "EffectDispatch.h"
 #include "RuntimeLog.h"
+#include <Preferences.h>
 
 static const char* TAG = "Main";
 
@@ -193,6 +194,17 @@ void setup() {
     // They can be set via HTTP API or will use defaults when starting demo
 
     // 4. Initialize HTTP Server (includes WiFi)
+    // Load device ID from NVS for mDNS hostname
+    {
+        Preferences prefs;
+        if (prefs.begin("kinemachina", true)) {
+            String id = prefs.getString("mqttDeviceId", "");
+            if (id.length() > 0) {
+                httpServer.setDeviceId(id.c_str());
+            }
+            prefs.end();
+        }
+    }
     httpServer.setBassMonoProcessor(&bassMonoProcessor);
     if (httpServer.begin(&audioController, &ledStripController, &demoController, &settingsController, &ledMatrixController)) {
         ESP_LOGI(TAG, "Web interface available at: http://%s", httpServer.getIPAddress().c_str());

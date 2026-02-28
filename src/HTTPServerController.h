@@ -25,6 +25,7 @@ private:
     char* wifiSSID;
     char* wifiPassword;
     int httpPort;
+    char deviceId[32];
     
     // Async Web server
     AsyncWebServer* server;
@@ -136,11 +137,17 @@ public:
      * @param port HTTP server port (default: 80)
      */
     HTTPServerController(char* ssid, char* password, int port = 80);
-    
+
     /**
      * Destructor
      */
     ~HTTPServerController();
+
+    /**
+     * Set device ID for mDNS hostname and WiFi identification.
+     * Must be called before begin().
+     */
+    void setDeviceId(const char* id);
     
     /**
      * Initialize WiFi and HTTP server
