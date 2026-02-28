@@ -133,9 +133,9 @@ ESP_LOGD(TAG, "Heap: %u bytes", freeHeap);          // Periodic/verbose
 
 - **`Serial.print` is ONLY for interactive serial command responses** in `main.cpp` (direct replies to user-typed commands like `status`, `wifi`, `dir`). Everything else uses `ESP_LOGx`.
 - Each `.cpp` file defines `static const char* TAG = "Name";` at file scope.
-- **Include `"RuntimeLog.h"` (not `<esp_log.h>`)** in all project `.cpp` files. This header adds runtime level checking that Arduino-ESP32's default macros lack. The `USE_ESP_IDF_LOG` flag can't be used globally because it breaks third-party libraries.
-- Compile-time max level is set via `-DCORE_DEBUG_LEVEL=4` (DEBUG) in `platformio.ini`.
-- Runtime level is controlled by the global `runtimeLogLevel` variable (set via `log` serial command). The `RuntimeLog.h` macros check this before printing.
+- **Include `"RuntimeLog.h"` (not `<esp_log.h>`)** in all project `.cpp` files. This header re-defines `ESP_LOGx` to use `log_printf()` directly with a runtime level check against the global `runtimeLogLevel` variable. This decouples project logging from `CORE_DEBUG_LEVEL`, so our code has full runtime control regardless of the compile-time setting.
+- `CORE_DEBUG_LEVEL=2` (WARN) in `platformio.ini` silences third-party library `log_i()`/`log_d()` output at compile time (e.g., AsyncMqttClient publish spam). Arduino-ESP32's `log_e()`/`log_i()` etc. are gated by this at compile time with no runtime override.
+- Runtime level is controlled by the global `runtimeLogLevel` variable (set via `log` serial command). Project code uses `RuntimeLog.h` macros that check this before printing, so all levels (ERROR through VERBOSE) work at runtime for our code.
 - Consolidate multi-line output into single `ESP_LOGx` calls with printf format strings.
 - Use `.c_str()` for Arduino `String`, `.toString().c_str()` for `IPAddress`.
 
