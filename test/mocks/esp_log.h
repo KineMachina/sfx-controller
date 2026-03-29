@@ -10,6 +10,9 @@ typedef enum {
     ESP_LOG_VERBOSE = 5
 } esp_log_level_t;
 
+// log_printf — no-op in native tests (used by RuntimeLog.h macros)
+#define log_printf(format, ...) ((void)0)
+
 // Arduino-ESP32 log_x macros — no-ops in native tests
 #define log_e(format, ...) ((void)0)
 #define log_w(format, ...) ((void)0)
